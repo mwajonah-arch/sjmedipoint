@@ -580,7 +580,7 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
             table: 'kv_store',
             filter: `key=eq.${checkoutKey}`
           },
-          (payload) => {
+          async (payload) => {
             // Handle the update from the M-Pesa callback
             const newValue = payload.new.value;
 
