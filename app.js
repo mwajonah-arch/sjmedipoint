@@ -580,7 +580,7 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
             table: 'kv_store',
             filter: `key=eq.${checkoutKey}`
           },
-          async (payload) => {
+          (payload) => {
             // Handle the update from the M-Pesa callback
             const newValue = payload.new.value;
 
@@ -595,15 +595,22 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
 
               if (isSuccessful) {
                 // Payment successful - complete the sale
-                await onComplete({
+                onComplete({
                   method,
                   tendered: total,
                   change: 0,
                   mpesaPhone,
                   mpesaReceiptNumber: newValue.mpesaReceiptNumber || ''
+                })
+                .then(() => {
+                  setMpesaProcessing(false);
+                  onClose(); // Close the modal on success
+                })
+                .catch(error => {
+                  console.error('Error completing sale:', error);
+                  setMpesaError('Error completing sale. Please try again.');
+                  setMpesaProcessing(false);
                 });
-                setMpesaProcessing(false);
-                onClose(); // Close the modal on success
               } else {
                 // Payment failed
                 setMpesaError(`Payment failed: ${newValue.resultDescription || 'Unknown error'}`);
