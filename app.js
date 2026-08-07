@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'https://esm.sh/react@18';
 import ReactDOM from 'https://esm.sh/react-dom@18/client';
 import {
   ShoppingCart, Plus, Minus, Trash2, Search, LogOut, Package, TrendingUp,
@@ -223,7 +223,7 @@ const STYLES = `
 .pos-admin-nav-btn { width: 100%; }
 .pos-admin-content { flex: 1; overflow-y: auto; padding: 24px; }
 .pos-table-scroll { overflow-x: auto; }
-.pos-modal-backdrop { position: fixed; inset: 0; background: rgba(22,66,60,0.35); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+.pos-modal-backdrop { position: fixed; inset: 0; background: rgba(22,66,60,0.35); display: flex; align-items: center; justify-content: center; z-index: 90; padding: 16px; }
 .pos-modal { width: 380px; max-width: 100%; }
 
 @media (max-width: 860px) {
@@ -372,13 +372,17 @@ function TopBar({ settings, user, onLogout, lastSynced, right }) {
 /* Staff / Cashier POS                                                     */
 /* ---------------------------------------------------------------------- */
 
-function StaffPOS({ inventory, settings, user, addSale, updateStock, lastSynced, onLogout }) {
+function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, lastSynced, onLogout }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [cart, setCart] = useState([]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [receipt, setReceipt] = useState(null);
   const [cartOpen, setCartOpen] = useState(false);
+  const [summaryOpen, setSummaryOpen] = useState(false);
+
+  const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()));
+  const myTodayRevenue = myTodaySales.reduce((sum, s) => sum + s.total, 0);
 
   const categories = ['All', ...Array.from(new Set(inventory.map((p) => p.category)))];
 
@@ -457,6 +461,14 @@ function StaffPOS({ inventory, settings, user, addSale, updateStock, lastSynced,
             <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
+            <button onClick={() => setSummaryOpen(true)} style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
+              border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
+            }}>
+              <TrendingUp size={15} color="var(--pine)" />
+              <span style={{ fontWeight: 600 }} className="pos-mono">{formatMoney(myTodayRevenue, settings.currency)}</span>
+              <span style={{ color: 'var(--muted)' }}>today</span>
+            </button>
           </div>
 
           <div className="pos-product-grid">
@@ -534,7 +546,7 @@ function StaffPOS({ inventory, settings, user, addSale, updateStock, lastSynced,
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 700, marginBottom: 12 }}>
               <span className="pos-serif">Total</span><span className="pos-mono">{formatMoney(total, settings.currency)}</span>
             </div>
-            <button onClick={() => setCheckoutOpen(true)} disabled={cart.length === 0} style={{
+            <button onClick={() => { setCheckoutOpen(true); setCartOpen(false); }} disabled={cart.length === 0} style={{
               width: '100%', padding: '12px 0', borderRadius: 10, border: 'none',
               background: cart.length === 0 ? '#B9C4B4' : 'var(--pine)', color: '#fff', fontWeight: 600, fontSize: 15
             }}>Charge {cart.length > 0 ? formatMoney(total, settings.currency) : ''}</button>
@@ -561,6 +573,91 @@ function StaffPOS({ inventory, settings, user, addSale, updateStock, lastSynced,
           onClose={() => setCheckoutOpen(false)} onComplete={completeSale} />
       )}
       {receipt && <ReceiptModal sale={receipt} settings={settings} onClose={() => { setReceipt(null); setCartOpen(false); }} />}
+      {summaryOpen && <CashierSummaryModal sales={sales} settings={settings} user={user} onClose={() => setSummaryOpen(false)} />}
+    </div>
+  );
+}
+
+const PAYMENT_METHOD_META = {
+  cash: { label: 'Cash', Icon: Banknote },
+  card: { label: 'Card', Icon: CreditCard },
+  mpesa: { label: 'M-Pesa', Icon: Smartphone },
+};
+
+// Simple, dependency-free bar breakdown — reused by the cashier's daily
+// summary and the admin dashboard.
+function PaymentMethodBars({ sales, settings }) {
+  const totals = Object.keys(PAYMENT_METHOD_META).map((method) => {
+    const matching = sales.filter((s) => s.paymentMethod === method);
+    return { method, total: matching.reduce((sum, s) => sum + s.total, 0), count: matching.length };
+  });
+  const max = Math.max(1, ...totals.map((t) => t.total));
+
+  if (sales.length === 0) {
+    return <p style={{ fontSize: 13, color: 'var(--muted)' }}>No sales yet.</p>;
+  }
+
+  return (
+    <div>
+      {totals.map((t) => {
+        const { label, Icon } = PAYMENT_METHOD_META[t.method];
+        return (
+          <div key={t.method} style={{ marginBottom: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--muted)' }}><Icon size={13} />{label}</span>
+              <span className="pos-mono">{formatMoney(t.total, settings.currency)} · {t.count}</span>
+            </div>
+            <div style={{ background: 'var(--bg)', borderRadius: 6, height: 8, overflow: 'hidden' }}>
+              <div style={{ width: `${(t.total / max) * 100}%`, height: '100%', background: 'var(--pine)', borderRadius: 6, transition: 'width .2s' }} />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function CashierSummaryModal({ sales, settings, user, onClose }) {
+  const today = new Date();
+  const mySales = sales
+    .filter((s) => s.cashier === user.name && isSameDay(s.timestamp, today))
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  const revenue = mySales.reduce((sum, s) => sum + s.total, 0);
+
+  return (
+    <div className="pos-modal-backdrop">
+      <div className="pos-modal" style={{ background: '#fff', borderRadius: 14, padding: 24, maxHeight: '85vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+          <span className="pos-serif" style={{ fontSize: 18, fontWeight: 700 }}>Your day so far</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
+        </div>
+
+        <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
+          <div style={{ flex: 1, background: 'var(--pine-pale)', borderRadius: 10, padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Sales rung up</div>
+            <div className="pos-serif" style={{ fontSize: 20, fontWeight: 700 }}>{mySales.length}</div>
+          </div>
+          <div style={{ flex: 1, background: 'var(--pine-pale)', borderRadius: 10, padding: '12px 14px' }}>
+            <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Total revenue</div>
+            <div className="pos-mono" style={{ fontSize: 20, fontWeight: 700 }}>{formatMoney(revenue, settings.currency)}</div>
+          </div>
+        </div>
+
+        <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>By payment method</h3>
+        <PaymentMethodBars sales={mySales} settings={settings} />
+
+        {mySales.length > 0 && (
+          <>
+            <h3 style={{ fontSize: 13, fontWeight: 600, margin: '18px 0 10px' }}>Recent sales</h3>
+            {mySales.slice(0, 6).map((s) => (
+              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <span>{new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {s.items.length} item{s.items.length !== 1 ? 's' : ''}</span>
+                <span className="pos-mono">{formatMoney(s.total, settings.currency)}</span>
+              </div>
+            ))}
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -824,6 +921,58 @@ function StatCard({ label, value, accent }) {
   );
 }
 
+// Interactive 7-day revenue chart — tap/click a day to see its totals.
+// Plain divs sized by percentage, no charting library needed.
+function RevenueTrend({ sales, settings }) {
+  const days = useMemo(() => {
+    const arr = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const daySales = sales.filter((s) => isSameDay(s.timestamp, d));
+      arr.push({
+        label: d.toLocaleDateString(undefined, { weekday: 'short' }),
+        dateLabel: d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }),
+        revenue: daySales.reduce((sum, s) => sum + s.total, 0),
+        count: daySales.length,
+      });
+    }
+    return arr;
+  }, [sales]);
+
+  const [selected, setSelected] = useState(6); // default to today
+  const max = Math.max(1, ...days.map((d) => d.revenue));
+  const sel = days[selected];
+
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+        <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600 }}>Last 7 days</h3>
+        <div style={{ textAlign: 'right' }}>
+          <div className="pos-mono" style={{ fontSize: 17, fontWeight: 700 }}>{formatMoney(sel.revenue, settings.currency)}</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)' }}>{sel.count} sale{sel.count !== 1 ? 's' : ''} · {sel.dateLabel}</div>
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 90 }}>
+        {days.map((d, i) => (
+          <button key={i} onClick={() => setSelected(i)} style={{
+            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+            background: 'none', border: 'none', height: '100%', justifyContent: 'flex-end', padding: 0
+          }}>
+            <div style={{
+              width: '100%', maxWidth: 30, borderRadius: 4,
+              height: `${Math.max(4, (d.revenue / max) * 66)}px`,
+              background: i === selected ? 'var(--pine)' : 'var(--pine-pale)',
+              transition: 'background .15s, height .2s'
+            }} />
+            <span style={{ fontSize: 10, color: i === selected ? 'var(--pine)' : 'var(--muted)', fontWeight: i === selected ? 700 : 500 }}>{d.label}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function DashboardTab({ inventory, sales, settings }) {
   const today = new Date();
   const todaySales = sales.filter((s) => isSameDay(s.timestamp, today));
@@ -839,6 +988,14 @@ function DashboardTab({ inventory, sales, settings }) {
         <StatCard label="Transactions today" value={todaySales.length} />
         <StatCard label="Products tracked" value={inventory.length} />
         <StatCard label="Low stock alerts" value={lowStock.length} accent={lowStock.length ? 'var(--red)' : undefined} />
+      </div>
+
+      <div className="pos-dash-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+        <RevenueTrend sales={sales} settings={settings} />
+        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
+          <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Today's payments</h3>
+          <PaymentMethodBars sales={todaySales} settings={settings} />
+        </div>
       </div>
 
       <div className="pos-dash-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
@@ -1232,7 +1389,7 @@ function App() {
   }
 
   return (
-    <StaffPOS inventory={inventory} settings={settings} user={user}
+    <StaffPOS inventory={inventory} sales={sales} settings={settings} user={user}
       addSale={addSale} updateStock={updateStock} lastSynced={lastSynced} onLogout={handleLogout} />
   );
 }
