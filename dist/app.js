@@ -1869,37 +1869,40 @@ function SalesSummaryTab({ sales, settings }) {
 }
 
 const getPeriodSales = (period) => {
-      case 'today':
-        start = startOfDay(now);
-        end = endOfDay(now);
-        break;
-      case 'yesterday':
-        const yesterday = subDays(now, 1);
-        start = startOfDay(yesterday);
-        end = endOfDay(yesterday);
-        break;
-      case 'thisWeek':
-        start = startOfWeek(now);
-        end = endOfWeek(now);
-        break;
-      case 'lastWeek':
-        const lastWeek = subWeeks(now, 1);
-        start = startOfWeek(lastWeek);
-        end = endOfWeek(lastWeek);
-        break;
-      case 'thisMonth':
-        start = startOfMonth(now);
-        end = endOfMonth(now);
-        break;
-      case 'lastMonth':
-        const lastMonth = subMonths(now, 1);
-        start = startOfMonth(lastMonth);
-        end = endOfMonth(lastMonth);
-        break;
-      default:
-        start = startOfDay(now);
-        end = endOfDay(now);
-    }
+      const now = new Date();
+      let start, end;
+      switch (period) {
+        case 'today':
+          start = startOfDay(now);
+          end = endOfDay(now);
+          break;
+        case 'yesterday':
+          const yesterday = subDays(now, 1);
+          start = startOfDay(yesterday);
+          end = endOfDay(yesterday);
+          break;
+        case 'thisWeek':
+          start = startOfWeek(now);
+          end = endOfWeek(now);
+          break;
+        case 'lastWeek':
+          const lastWeek = subWeeks(now, 1);
+          start = startOfWeek(lastWeek);
+          end = endOfWeek(lastWeek);
+          break;
+        case 'thisMonth':
+          start = startOfMonth(now);
+          end = endOfMonth(now);
+          break;
+        case 'lastMonth':
+          const lastMonth = subMonths(now, 1);
+          start = startOfMonth(lastMonth);
+          end = endOfMonth(lastMonth);
+          break;
+        default:
+          start = startOfDay(now);
+          end = endOfDay(now);
+      }
     const salesInPeriod = sales.filter((sale) => {
       const saleDate = new Date(sale.timestamp);
       return saleDate >= start && saleDate <= end;
