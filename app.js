@@ -1866,7 +1866,9 @@ function SalesSummaryTab({ sales, settings }) {
       </div>
     </div>
   );
-}iod) {
+}
+
+const getPeriodSales = (period) => {
       case 'today':
         start = startOfDay(now);
         end = endOfDay(now);
