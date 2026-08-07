@@ -7,7 +7,6 @@ import {
   ClipboardList
 } from 'https://esm.sh/lucide-react@0.383.0?deps=react@18';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import './styles.css';
 
 /* ---------------------------------------------------------------------- */
 /* Supabase connection                                                    */
@@ -65,6 +64,25 @@ const DEFAULT_STAFF = [
 ];
 
 const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxRate: 16 };
+
+/* ---------------------------------------------------------------------- */
+/* CSS Variables                                                          */
+/* ---------------------------------------------------------------------- */
+
+const cssVariables = `
+  --pine: #16423C;
+  --pine-light: #2F6B57;
+  --pine-pale: #E7EEE9;
+  --paper: #FBF9F3;
+  --bg: #EEF1EA;
+  --ink: #202822;
+  --muted: #6B776E;
+  --border: #D9DFD4;
+  --amber: #C97A2B;
+  --amber-pale: #FBEEDD;
+  --red: #B23A48;
+  --red-pale: #FBE7E8;
+`;
 
 /* ---------------------------------------------------------------------- */
 /* Storage helpers — backed by Supabase, shared across every device       */
@@ -1866,38 +1884,43 @@ function SalesSummaryTab({ sales, settings }) {
       </div>
     </div>
   );
-}iod) {
-      case 'today':
-        start = startOfDay(now);
-        end = endOfDay(now);
-        break;
-      case 'yesterday':
-        const yesterday = subDays(now, 1);
-        start = startOfDay(yesterday);
-        end = endOfDay(yesterday);
-        break;
-      case 'thisWeek':
-        start = startOfWeek(now);
-        end = endOfWeek(now);
-        break;
-      case 'lastWeek':
-        const lastWeek = subWeeks(now, 1);
-        start = startOfWeek(lastWeek);
-        end = endOfWeek(lastWeek);
-        break;
-      case 'thisMonth':
-        start = startOfMonth(now);
-        end = endOfMonth(now);
-        break;
-      case 'lastMonth':
-        const lastMonth = subMonths(now, 1);
-        start = startOfMonth(lastMonth);
-        end = endOfMonth(lastMonth);
-        break;
-      default:
-        start = startOfDay(now);
-        end = endOfDay(now);
-    }
+}
+
+const getPeriodSales = (period) => {
+      const now = new Date();
+      let start, end;
+      switch (period) {
+        case 'today':
+          start = startOfDay(now);
+          end = endOfDay(now);
+          break;
+        case 'yesterday':
+          const yesterday = subDays(now, 1);
+          start = startOfDay(yesterday);
+          end = endOfDay(yesterday);
+          break;
+        case 'thisWeek':
+          start = startOfWeek(now);
+          end = endOfWeek(now);
+          break;
+        case 'lastWeek':
+          const lastWeek = subWeeks(now, 1);
+          start = startOfWeek(lastWeek);
+          end = endOfWeek(lastWeek);
+          break;
+        case 'thisMonth':
+          start = startOfMonth(now);
+          end = endOfMonth(now);
+          break;
+        case 'lastMonth':
+          const lastMonth = subMonths(now, 1);
+          start = startOfMonth(lastMonth);
+          end = endOfMonth(lastMonth);
+          break;
+        default:
+          start = startOfDay(now);
+          end = endOfDay(now);
+      }
     const salesInPeriod = sales.filter((sale) => {
       const saleDate = new Date(sale.timestamp);
       return saleDate >= start && saleDate <= end;
