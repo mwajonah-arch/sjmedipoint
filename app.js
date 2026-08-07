@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo, memo } from 'https://esm.sh/react@18';
+import React, { useState, useEffect, useRef, useCallback } from 'https://esm.sh/react@18';
 import ReactDOM from 'https://esm.sh/react-dom@18/client';
 import {
   ShoppingCart, Plus, Minus, Trash2, Search, LogOut, Package, TrendingUp,
@@ -66,157 +66,96 @@ const DEFAULT_STAFF = [
 const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxRate: 16 };
 
 /* ---------------------------------------------------------------------- */
-/* CSS Variables                                                          */
-/* ---------------------------------------------------------------------- */
-
-const cssVariables = `
-  --pine: #16423C;
-  --pine-light: #2F6B57;
-  --pine-pale: #E7EEE9;
-  --paper: #FBF9F3;
-  --bg: #EEF1EA;
-  --ink: #202822;
-  --muted: #6B776E;
-  --border: #D9DFD4;
-  --amber: #C97A2B;
-  --amber-pale: #FBEEDD;
-  --red: #B23A48;
-  --red-pale: #FBE7E8;
-`;
-
-/* ---------------------------------------------------------------------- */
 /* Storage helpers — backed by Supabase, shared across every device       */
+/*                                                                        */
+/* Every key also mirrors into localStorage on this device. If a save     */
+/* can't reach Supabase (no signal / wifi down), the change still applies */
+/* immediately on screen and is marked "dirty" locally. Dirty keys are    */
+/* retried automatically — on a timer, and the moment the browser         */
+/* reports it's back online — until they successfully sync.               */
 /* ---------------------------------------------------------------------- */
 
-async function getOrInit(key, defaultValue) {
-async function getOrInit(key, defaultValue) {
-  // If offline, try to get from local storage first
-  if (!isOnline()) {
-    try {
-      const db = await initDB();
-      const transaction = db.transaction(STORES.KV_STORE, "readonly");
-      const store = transaction.objectStore(STORES.KV_STORE);
-      const request = store.get(key);
-      
-      return new Promise((resolve, reject) => {
-        request.onsuccess = () => {
-          db.close();
-          if (request.result) {
-            resolve(request.result.value);
-          } else {
-            // Not found locally, return default
-            resolve(defaultValue);
-          }
-        };
-        request.onerror = () => {
-          db.close();
-          reject(request.error);
-        };
-      });
-    } catch (error) {
-      console.error('Error reading from local storage:', error);
-      // Fall back to default if local storage fails
-      return defaultValue;
-    }
+const STORE_KEYS = ['inventory', 'sales', 'staff', 'settings'];
+const CACHE_PREFIX = 'pos_cache_';
+const DIRTY_PREFIX = 'pos_dirty_';
+
+function readCache(key) {
+  try {
+    const raw = localStorage.getItem(CACHE_PREFIX + key);
+    return raw === null ? null : JSON.parse(raw);
+  } catch (e) {
+    return null;
   }
-  
-  // Online - try Supabase first
+}
+
+function writeCache(key, value) {
+  try {
+    localStorage.setItem(CACHE_PREFIX + key, JSON.stringify(value));
+  } catch (e) {
+    console.error('local cache write failed for', key, e);
+  }
+}
+
+function markDirty(key) {
+  try { localStorage.setItem(DIRTY_PREFIX + key, '1'); } catch (e) { /* ignore */ }
+}
+function clearDirty(key) {
+  try { localStorage.removeItem(DIRTY_PREFIX + key); } catch (e) { /* ignore */ }
+}
+function isDirty(key) {
+  try { return localStorage.getItem(DIRTY_PREFIX + key) === '1'; } catch (e) { return false; }
+}
+function getDirtyKeys() {
+  return STORE_KEYS.filter(isDirty);
+}
+
+async function getOrInit(key, defaultValue) {
+  // Trust the local copy while it has unsynced changes — a server read
+  // right now would just be stale and would clobber what's on screen.
+  if (isDirty(key)) {
+    const cached = readCache(key);
+    if (cached !== null) return cached;
+  }
   try {
     const { data, error } = await supabase.from('kv_store').select('value').eq('key', key).maybeSingle();
-    if (error) {
-      console.error('load failed for', key, error);
-      // Fallback to local storage if Supabase fails
-      try {
-        const db = await initDB();
-        const transaction = db.transaction(STORES.KV_STORE, "readonly");
-        const store = transaction.objectStore(STORES.KV_STORE);
-        const request = store.get(key);
-        
-        return new Promise((resolve) => {
-          request.onsuccess = () => {
-            db.close();
-            if (request.result) {
-              resolve(request.result.value);
-            } else {
-              // Store default locally for future offline use
-              saveToStore(STORES.KV_STORE, { key, value: defaultValue });
-              resolve(defaultValue);
-            }
-          };
-        });
-      } catch (localError) {
-        console.error('Error accessing local storage:', localError);
-        return defaultValue;
-      }
-    }
-    
+    if (error) throw error;
     if (!data) {
-      // Store in both local and Supabase for consistency
       await saveShared(key, defaultValue);
-      // Also store locally for faster access
-      try {
-        await saveToStore(STORES.KV_STORE, { key, value: defaultValue });
-      } catch (localError) {
-        console.warn('Could not store locally:', localError);
-      }
       return defaultValue;
     }
-    
-    // Store locally for faster access next time
-    try {
-      await saveToStore(STORES.KV_STORE, { key, value: data.value });
-    } catch (localError) {
-      console.warn('Could not store locally:', localError);
-    }
-    
+    writeCache(key, data.value);
     return data.value;
-  } catch (error) {
-    console.error('Error in getOrInit:', error);
-    // Final fallback to local storage
-    try {
-      const db = await initDB();
-      const transaction = db.transaction(STORES.KV_STORE, "readonly");
-      const store = transaction.objectStore(STORES.KV_STORE);
-      const request = store.get(key);
-      
-      return new Promise((resolve) => {
-        request.onsuccess = () => {
-          db.close();
-          if (request.result) {
-            resolve(request.result.value);
-          } else {
-            // Store default locally for future use
-            saveToStore(STORES.KV_STORE, { key, value: defaultValue });
-            resolve(defaultValue);
-          }
-        };
-      });
-    } catch (localError) {
-      console.error('Error accessing local storage:', localError);
-      return defaultValue;
-    }
+  } catch (e) {
+    const cached = readCache(key);
+    if (cached !== null) return cached;
+    return defaultValue;
   }
 }
-
 
 async function saveShared(key, value) {
-  // Always save to Supabase when online
-  if (isOnline()) {
-    try {
-      const { error } = await supabase.from('kv_store').upsert({ key, value, updated_at: new Date().toISOString() });
-      if (error) console.error('sync failed for', key, error);
-    } catch (error) {
-      console.error('Error saving to Supabase:', error);
-    }
-  }
-  
-  // Always save to local storage for offline access and faster access
+  // Always cache locally first so the UI and any offline session reflect
+  // the change immediately, regardless of what the network does.
+  writeCache(key, value);
   try {
-    await saveToStore(STORES.KV_STORE, { key, value });
-  } catch (error) {
-    console.error('Error saving to local storage:', error);
+    const { error } = await supabase.from('kv_store').upsert({ key, value, updated_at: new Date().toISOString() });
+    if (error) throw error;
+    clearDirty(key);
+    return true;
+  } catch (e) {
+    markDirty(key);
+    return false;
   }
 }
+
+// Attempt to push any keys that failed to sync earlier. Safe to call often —
+// it's a no-op when nothing is dirty.
+async function flushDirtyKeys() {
+  for (const key of getDirtyKeys()) {
+    const cached = readCache(key);
+    if (cached !== null) await saveShared(key, cached);
+  }
+}
+
 const SESSION_KEY = 'pos_session_staff_id';
 
 function genId(prefix) {
@@ -239,11 +178,19 @@ function isSameDay(iso, ref) {
 const STYLES = `
 @import url('https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
-:root {
-  ${cssVariables}
-}
-
 .pos-root {
+  --pine: #16423C;
+  --pine-light: #2F6B57;
+  --pine-pale: #E7EEE9;
+  --paper: #FBF9F3;
+  --bg: #EEF1EA;
+  --ink: #202822;
+  --muted: #6B776E;
+  --border: #D9DFD4;
+  --amber: #C97A2B;
+  --amber-pale: #FBEEDD;
+  --red: #B23A48;
+  --red-pale: #FBE7E8;
   font-family: 'Inter', sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -258,6 +205,8 @@ const STYLES = `
 .pos-root input, .pos-root select { font-family: 'Inter', sans-serif; }
 .pos-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .pos-scroll::-webkit-scrollbar-thumb { background: #C7D0C0; border-radius: 4px; }
+
+@keyframes pos-spin { to { transform: rotate(360deg); } }
 
 /* Structural classes (kept plain on desktop, overridden below on mobile) */
 .pos-topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; background: var(--pine); color: #fff; flex-wrap: wrap; gap: 8px; }
@@ -306,38 +255,6 @@ const STYLES = `
   .pos-dash-columns { grid-template-columns: 1fr !important; gap: 20px !important; }
   .pos-inv-toolbar { flex-direction: column !important; align-items: stretch !important; gap: 10px !important; }
 }
-
-/* Additional breakpoints for smaller screens */
-@media (max-width: 768px) {
-  .pos-product-grid { grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 6px; }
-  .pos-cart-panel { width: 100%; }
-  .pos-admin-nav { flex-wrap: wrap; }
-  .pos-admin-nav-btn { flex: 1 0 50%; } /* two items per row */
-  .pos-product-panel { padding: 12px 12px 80px; }
-}
-
-@media (max-width: 600px) {
-  .pos-product-grid { grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 4px; }
-  .pos-topbar { flex-direction: column; align-items: flex-start; }
-  .pos-topbar-right { margin-top: 8px; width: 100%; justify-content: flex-start; }
-  .pos-stat-grid { grid-template-columns: 1fr !important; }
-  .pos-dash-columns { grid-template-columns: 1fr !important; gap: 15px !important; }
-  .pos-inv-toolbar { align-items: stretch; }
-  .pos-admin-nav-btn { flex: 1 0 100%; } /* full width */
-  .pos-product-panel { padding: 10px 10px 70px; }
-}
-
-@media (max-width: 480px) {
-  .pos-product-grid { grid-template-columns: repeat(auto-fill, minmax(80px, 1fr)); gap: 2px; }
-  .pos-filter-row { flex-direction: column; align-items: stretch; }
-  .pos-filter-row > div, .pos-filter-row > select { width: 100%; margin-bottom: 8px; }
-  .pos-product-panel { padding: 8px 8px 60px; }
-  .pos-cart-panel.pos-cart-open { padding: 8px; }
-  .pos-cart-panel > div { padding: 8px; }
-  .pos-cart-mobile-bar { padding: 6px 10px; }
-  .pos-topbar { padding: 8px 12px; }
-  .pos-topbar-right { gap: 8px; }
-}
 `;
 
 /* ---------------------------------------------------------------------- */
@@ -370,7 +287,7 @@ function LoginScreen({ staffList, settings, onLogin }) {
     <div className="pos-root" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 24 }}>
       <style>{STYLES}</style>
       <div style={{ width: 360, maxWidth: '100%', background: 'var(--paper)', borderRadius: 16, border: '1px solid var(--border)', padding: '32px 28px', textAlign: 'center' }}>
-        <div style={{ width: 52, height: 52, borderRadius: 12, background: 'var(--pine)', color: 'var(--ink-inverted)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+        <div style={{ width: 52, height: 52, borderRadius: 12, background: 'var(--pine)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
           <Pill size={26} />
         </div>
         <h1 className="pos-serif" style={{ fontSize: 22, fontWeight: 700, margin: '0 0 2px' }}>{settings.pharmacyName}</h1>
@@ -384,7 +301,7 @@ function LoginScreen({ staffList, settings, onLogin }) {
               style={{
                 flex: 1, padding: '8px 0', borderRadius: 8, border: 'none',
                 background: tab === t ? 'var(--pine)' : 'transparent',
-                color: tab === t ? 'var(--ink-inverted)' : 'var(--pine)',
+                color: tab === t ? '#fff' : 'var(--pine)',
                 fontWeight: 600, fontSize: 13, transition: 'all .15s'
               }}
             >
@@ -413,7 +330,7 @@ function LoginScreen({ staffList, settings, onLogin }) {
 
           <button type="submit" disabled={!pin} style={{
             width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', fontSize: 15, fontWeight: 600,
-            background: pin ? 'var(--pine)' : '#B9C4B4', color: 'var(--ink-inverted)'
+            background: pin ? 'var(--pine)' : '#B9C4B4', color: '#fff'
           }}>Log in</button>
         </form>
       </div>
@@ -425,7 +342,7 @@ function LoginScreen({ staffList, settings, onLogin }) {
 /* Shared header                                                          */
 /* ---------------------------------------------------------------------- */
 
-function TopBar({ settings, user, onLogout, lastSynced, right, isOnline, isSyncing, offlineQueue, processQueue }) {
+function TopBar({ settings, user, onLogout, lastSynced, right }) {
   return (
     <div className="pos-topbar">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
@@ -440,44 +357,8 @@ function TopBar({ settings, user, onLogout, lastSynced, right, isOnline, isSynci
       <div className="pos-topbar-right">
         {right}
         <div className="pos-sync-indicator" style={{ fontSize: 11, opacity: 0.7, display: 'flex', alignItems: 'center', gap: 6 }}>
-          {/* Online/Offline Status */}
-          <span style={{
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            display: 'inline-block',
-            background: isOnline ? '#7FD99A' : '#F28B82' /* Green when online, Red when offline */
-          }} />
-          {!isOnline ? 'Offline' : `Synced ${lastSynced}`}
-
-          {/* Show queue status if there are pending operations */}
-          {offlineQueue.length > 0 && (
-            <>
-              <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--amber)' }}>
-                {offlineQueue.length} pending
-              </span>
-              {!isSyncing && (
-                <button
-                  onClick={processQueue}
-                  style={{
-                    background: 'none',
-                    border: 'none',
-                    color: 'var(--amber)',
-                    fontSize: 10,
-                    padding: 0,
-                    marginLeft: 4
-                  }}
-                >
-                  Sync
-                </button>
-              )}
-              {isSyncing && (
-                <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--amber)' }}>
-                  Syncing...
-                </span>
-              )}
-            </>
-          )}
+          <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#7FD99A', display: 'inline-block' }} />
+          Synced {lastSynced}
         </div>
         <button onClick={onLogout} style={{ background: 'rgba(255,255,255,0.12)', border: 'none', color: '#fff', borderRadius: 8, padding: '8px 12px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <LogOut size={14} /> Log out
@@ -491,7 +372,7 @@ function TopBar({ settings, user, onLogout, lastSynced, right, isOnline, isSynci
 /* Staff / Cashier POS                                                     */
 /* ---------------------------------------------------------------------- */
 
-function StaffPOS({ inventory, settings, user, addSale, updateStock, lastSynced, onLogout, isOnline, isSyncing, offlineQueue, processQueue }) {
+function StaffPOS({ inventory, settings, user, addSale, updateStock, lastSynced, onLogout }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [cart, setCart] = useState([]);
@@ -545,6 +426,7 @@ function StaffPOS({ inventory, settings, user, addSale, updateStock, lastSynced,
       paymentMethod: payment.method,
       amountTendered: payment.tendered ?? total,
       change: payment.change ?? 0,
+      mpesaReceipt: payment.mpesaReceipt || null,
     };
     addSale(sale);
     updateStock(cart.map((i) => ({ id: i.id, qty: i.qty })));
@@ -557,17 +439,8 @@ function StaffPOS({ inventory, settings, user, addSale, updateStock, lastSynced,
   return (
     <div className="pos-root" style={{ minHeight: '100vh' }}>
       <style>{STYLES}</style>
-      <TopBar
-        settings={settings}
-        user={user}
-        onLogout={onLogout}
-        lastSynced={lastSynced}
-        isOnline={isOnline}
-        isSyncing={isSyncing}
-        offlineQueue={offlineQueue}
-        processQueue={processQueue}
-        right={<div style={{ fontSize: 12, opacity: 0.85 }}>{cart.length} item{cart.length !== 1 ? 's' : ''} in cart</div>}
-      />
+      <TopBar settings={settings} user={user} onLogout={onLogout} lastSynced={lastSynced}
+        right={<div style={{ fontSize: 12, opacity: 0.85 }}>{cart.length} item{cart.length !== 1 ? 's' : ''} in cart</div>} />
 
       <div className="pos-staff-layout">
         {/* Product browser */}
@@ -578,10 +451,10 @@ function StaffPOS({ inventory, settings, user, addSale, updateStock, lastSynced,
               <input
                 value={query} onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search by name or SKU"
-                style={{ width: '100%', padding: '10px 12px 10px 34px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--paper)', fontSize: 14 }}
+                style={{ width: '100%', padding: '10px 12px 10px 34px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}
               />
             </div>
-            <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--paper)', fontSize: 14 }}>
+            <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
           </div>
@@ -642,9 +515,9 @@ function StaffPOS({ inventory, settings, user, addSale, updateStock, lastSynced,
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <button onClick={() => changeQty(i.id, -1)} style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--paper)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Minus size={12} /></button>
+                    <button onClick={() => changeQty(i.id, -1)} style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Minus size={12} /></button>
                     <span className="pos-mono" style={{ fontSize: 13, minWidth: 16, textAlign: 'center' }}>{i.qty}</span>
-                    <button onClick={() => changeQty(i.id, 1)} style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid var(--border)', background: 'var(--paper)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={12} /></button>
+                    <button onClick={() => changeQty(i.id, 1)} style={{ width: 22, height: 22, borderRadius: 6, border: '1px solid var(--border)', background: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Plus size={12} /></button>
                   </div>
                   <span className="pos-mono" style={{ fontSize: 13 }}>{formatMoney(i.price * i.qty, settings.currency)}</span>
                 </div>
@@ -697,152 +570,73 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
   const [tendered, setTendered] = useState('');
   const [rxConfirmed, setRxConfirmed] = useState(false);
   const [mpesaPhone, setMpesaPhone] = useState('');
-  const [mpesaProcessing, setMpesaProcessing] = useState(false);
+  const [mpesaStatus, setMpesaStatus] = useState('idle'); // idle | sending | waiting | success | failed | timeout
   const [mpesaError, setMpesaError] = useState('');
-  const [mpesaCheckoutId, setMpesaCheckoutId] = useState('');
+  const [mpesaReceipt, setMpesaReceipt] = useState(null);
+  const pollTimer = useRef(null);
   const needsRx = cart.some((i) => i.requiresRx);
   const tenderedNum = parseFloat(tendered) || 0;
   const change = method === 'cash' ? Math.max(0, tenderedNum - total) : 0;
-  const canComplete =
-    (!needsRx || rxConfirmed) &&
-    (method !== 'cash' ? tenderedNum >= total : true) && // For card/MPesa, we assume amount is covered
-    (method !== 'mpesa' || (mpesaPhone && !mpesaProcessing && !mpesaError)) // For MPesa, we need a valid phone number
+  const canComplete = (!needsRx || rxConfirmed) && (method !== 'cash' || tenderedNum >= total);
 
-  // Refs to store subscription and checkout ID for cleanup
-  const mpesaSubscriptionRef = useRef(null);
-  const mpesaCheckoutIdRef = useRef('');
+  useEffect(() => () => { if (pollTimer.current) clearInterval(pollTimer.current); }, []);
 
-  // Clean up subscription on unmount
+  // Once M-Pesa confirms payment, finish the sale automatically.
   useEffect(() => {
-    return () => {
-      if (mpesaSubscriptionRef.current) {
-        supabase.removeChannel(mpesaSubscriptionRef.current);
-      }
-    };
-  }, []);
-
-  const handleMpesaPayment = async () => {
-    if (!mpesaPhone) {
-      setMpesaError('Please enter a phone number');
-      return;
+    if (method === 'mpesa' && mpesaStatus === 'success') {
+      onComplete({ method: 'mpesa', tendered: total, change: 0, mpesaReceipt });
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mpesaStatus]);
 
-    // Validate Kenyan phone number format (simplified)
-    const phoneRegex = /^\+?254[17]\d{8}$/;
-    if (!phoneRegex.test(mpesaPhone)) {
-      setMpesaError('Please enter a valid Kenyan phone number (e.g., +2547XXXXXXXX or 07XXXXXXXX)');
-      return;
-    }
-
-    setMpesaProcessing(true);
-    setMpesaError('');
-
-    try {
-      // Call our Supabase Edge Function to initiate STK push
-      const response = await fetch('/functions/v1/mpesa-stk-push', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          phoneNumber: mpesaPhone,
-          amount: total, // Total amount to charge
-          accountReference: 'MedipointPOS',
-          transactionDesc: 'Payment for medicines'
-        })
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.error || 'Failed to initiate payment');
-      }
-
-      // Store the checkout request ID to match with callback later
-      const checkoutRequestId = result.CheckoutRequestID;
-      setMpesaCheckoutId(checkoutRequestId);
-      mpesaCheckoutIdRef.current = checkoutRequestId;
-
-      // Clean up any existing subscription
-      if (mpesaSubscriptionRef.current) {
-        supabase.removeChannel(mpesaSubscriptionRef.current);
-      }
-
-      // Set up a real-time subscription to listen for updates to this specific checkout
-      const checkoutKey = `mpesa_checkout_${checkoutRequestId}`;
-      mpesaSubscriptionRef.current = supabase
-        .channel(`mpesa-checkout-${checkoutRequestId}`)
-        .on('postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'kv_store',
-            filter: `key=eq.${checkoutKey}`
-          },
-          (payload) => {
-            // Handle the update from the M-Pesa callback
-            const newValue = payload.new.value;
-
-            // Check if the payment has been processed
-            if (newValue && newValue.resultCode !== undefined) {
-              const isSuccessful = newValue.resultCode === 0;
-              const status = isSuccessful ? 'completed' : 'failed';
-
-              // Clean up subscription
-              supabase.removeChannel(mpesaSubscriptionRef.current);
-              mpesaSubscriptionRef.current = null;
-
-              if (isSuccessful) {
-                // Payment successful - complete the sale
-                onComplete({
-                  method,
-                  tendered: total,
-                  change: 0,
-                  mpesaPhone,
-                  mpesaReceiptNumber: newValue.mpesaReceiptNumber || ''
-                })
-                .then(() => {
-                  setMpesaProcessing(false);
-                  onClose(); // Close the modal on success
-                })
-                .catch(error => {
-                  console.error('Error completing sale:', error);
-                  setMpesaError('Error completing sale. Please try again.');
-                  setMpesaProcessing(false);
-                });
-              } else {
-                // Payment failed
-                setMpesaError(`Payment failed: ${newValue.resultDescription || 'Unknown error'}`);
-                setMpesaProcessing(false);
-              }
-            }
+  const watchMpesaStatus = (checkoutRequestId) => {
+    let attempts = 0;
+    pollTimer.current = setInterval(async () => {
+      attempts += 1;
+      try {
+        const { data } = await supabase.from('mpesa_transactions')
+          .select('status, mpesa_receipt, result_desc')
+          .eq('checkout_request_id', checkoutRequestId)
+          .maybeSingle();
+        if (data && data.status !== 'pending') {
+          clearInterval(pollTimer.current);
+          if (data.status === 'success') {
+            setMpesaReceipt(data.mpesa_receipt);
+            setMpesaStatus('success');
+          } else {
+            setMpesaError(data.result_desc || 'The customer did not complete the payment.');
+            setMpesaStatus('failed');
           }
-        )
-        .subscribe();
-
-      // Show processing message
-      setMpesaError('Processing payment... Please check your phone to complete the transaction.');
-    } catch (error) {
-      console.error('M-Pesa error:', error);
-      setMpesaError(error.message || 'Network error. Please check your connection and try again.');
-      setMpesaProcessing(false);
-
-      // Clean up subscription on error
-      if (mpesaSubscriptionRef.current) {
-        supabase.removeChannel(mpesaSubscriptionRef.current);
-        mpesaSubscriptionRef.current = null;
+          return;
+        }
+      } catch (e) { /* keep polling */ }
+      if (attempts >= 30) { // ~60 seconds
+        clearInterval(pollTimer.current);
+        setMpesaStatus((s) => (s === 'waiting' ? 'timeout' : s));
       }
-    }
+    }, 2000);
   };
 
-  // Clean up subscription when component unmounts or when MPesa process completes/resets
-  useEffect(() => {
-    return () => {
-      if (mpesaSubscriptionRef.current) {
-        supabase.removeChannel(mpesaSubscriptionRef.current);
+  const sendMpesaRequest = async () => {
+    setMpesaError('');
+    setMpesaStatus('sending');
+    const saleRef = 'POS' + Date.now().toString().slice(-8);
+    try {
+      const { data, error } = await supabase.functions.invoke('mpesa-stk-push', {
+        body: { phone: mpesaPhone, amount: total, saleRef },
+      });
+      if (error || !data || data.error) {
+        setMpesaStatus('failed');
+        setMpesaError((data && data.error) || (error && error.message) || 'Could not send the payment request.');
+        return;
       }
-    };
-  }, [mpesaProcessing, mpesaError]); // Re-run when processing state or error changes
+      setMpesaStatus('waiting');
+      watchMpesaStatus(data.checkoutRequestId);
+    } catch (e) {
+      setMpesaStatus('failed');
+      setMpesaError('Could not reach the payment service. Check your connection and try again.');
+    }
+  };
 
   return (
     <div className="pos-modal-backdrop">
@@ -863,13 +657,7 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
             { key: 'card', label: 'Card', Icon: CreditCard },
             { key: 'mpesa', label: 'M-Pesa', Icon: Smartphone },
           ].map(({ key, label, Icon }) => (
-            <button key={key} onClick={() => {
-              setMethod(key);
-              if (key === 'mpesa') {
-                setMpesaPhone('');
-                setMpesaError('');
-              }
-            }} style={{
+            <button key={key} onClick={() => setMethod(key)} style={{
               flex: 1, padding: '10px 0', borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
               border: method === key ? '1px solid var(--pine)' : '1px solid var(--border)',
               background: method === key ? 'var(--pine-pale)' : '#fff', color: method === key ? 'var(--pine)' : 'var(--ink)', fontSize: 12, fontWeight: 500
@@ -891,30 +679,44 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
           </div>
         )}
 
-        {method === 'mpesa' && !mpesaProcessing && (
+        {method === 'mpesa' && (
           <div style={{ marginBottom: 16 }}>
-            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Phone Number</label>
-            <input
-              type="tel"
-              value={mpesaPhone}
-              onChange={(e) => {
-                // Format phone number as user types
-                let value = e.target.value.replace(/\s+/g, ''); // Remove spaces
-                if (value.startsWith('0')) {
-                  value = '+254' + value.substring(1);
-                } else if (!value.startsWith('+254') && value.length >= 9) {
-                  value = '+254' + value;
-                }
-                setMpesaPhone(value);
-                setMpesaError('');
-              }}
-              placeholder="+2547XXXXXXXX"
-              style={{
-                width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 15, marginTop: 4
-              }}
-            />
-            {mpesaError && (
-              <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 4 }}>{mpesaError}</p>
+            {(mpesaStatus === 'idle' || mpesaStatus === 'sending' || mpesaStatus === 'failed') && (
+              <>
+                <label style={{ fontSize: 12, color: 'var(--muted)' }}>Customer's M-Pesa number</label>
+                <input value={mpesaPhone} onChange={(e) => setMpesaPhone(e.target.value)} placeholder="07XX XXX XXX" inputMode="tel"
+                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 15, marginTop: 4 }} />
+                {mpesaError && <p style={{ color: 'var(--red)', fontSize: 12, marginTop: 8 }}>{mpesaError}</p>}
+                <button type="button" onClick={sendMpesaRequest}
+                  disabled={!mpesaPhone || mpesaStatus === 'sending' || (needsRx && !rxConfirmed)}
+                  style={{
+                    marginTop: 10, width: '100%', padding: '11px 0', borderRadius: 8,
+                    border: '1px solid var(--pine)', background: '#fff', color: 'var(--pine)', fontWeight: 600, fontSize: 14,
+                    opacity: (!mpesaPhone || mpesaStatus === 'sending' || (needsRx && !rxConfirmed)) ? 0.5 : 1
+                  }}>
+                  {mpesaStatus === 'sending' ? 'Sending request…' : mpesaError ? 'Try again' : 'Send payment request'}
+                </button>
+              </>
+            )}
+            {(mpesaStatus === 'waiting' || mpesaStatus === 'timeout') && (
+              <div style={{ textAlign: 'center', padding: '14px 0' }}>
+                <div style={{ width: 34, height: 34, margin: '0 auto 10px', border: '3px solid var(--pine-pale)', borderTopColor: 'var(--pine)', borderRadius: '50%', animation: 'pos-spin 0.8s linear infinite' }} />
+                <p style={{ fontSize: 13, marginBottom: 4 }}>
+                  {mpesaStatus === 'timeout' ? 'Still waiting — ask the customer to check their phone.' : `A prompt was sent to ${mpesaPhone}.`}
+                </p>
+                <p style={{ fontSize: 12, color: 'var(--muted)' }}>Ask them to enter their M-Pesa PIN to complete the payment.</p>
+                {mpesaStatus === 'timeout' && (
+                  <button type="button" onClick={sendMpesaRequest} style={{ marginTop: 10, padding: '8px 14px', borderRadius: 8, border: '1px solid var(--pine)', background: '#fff', color: 'var(--pine)', fontSize: 13 }}>
+                    Resend request
+                  </button>
+                )}
+              </div>
+            )}
+            {mpesaStatus === 'success' && (
+              <div style={{ textAlign: 'center', padding: '10px 0', color: 'var(--pine)' }}>
+                <CheckCircle size={24} style={{ marginBottom: 6 }} />
+                <p style={{ fontSize: 13, fontWeight: 600 }}>Payment received{mpesaReceipt ? ` — ${mpesaReceipt}` : ''}</p>
+              </div>
             )}
           </div>
         )}
@@ -926,17 +728,12 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
           </label>
         )}
 
-        <button
-          onClick={method === 'mpesa' ? handleMpesaPayment : () => onComplete({ method, tendered: method === 'cash' ? tenderedNum : total, change })}
-          disabled={!canComplete || mpesaProcessing}
-          style={{
+        {method !== 'mpesa' && (
+          <button onClick={() => onComplete({ method, tendered: method === 'cash' ? tenderedNum : total, change })} disabled={!canComplete} style={{
             width: '100%', padding: '12px 0', borderRadius: 10, border: 'none', fontWeight: 600, fontSize: 15,
-            background: canComplete && !mpesaProcessing ? 'var(--pine)' : '#B9C4B4', color: '#fff',
-            opacity: mpesaProcessing ? 0.7 : 1
-          }}
-        >
-          {mpesaProcessing ? 'Processing...' : 'Confirm payment'}
-        </button>
+            background: canComplete ? 'var(--pine)' : '#B9C4B4', color: '#fff'
+          }}>Confirm payment</button>
+        )}
       </div>
     </div>
   );
@@ -967,6 +764,9 @@ function ReceiptModal({ sale, settings, onClose }) {
         {sale.paymentMethod === 'cash' && (
           <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)' }}><span>Change</span><span>{formatMoney(sale.change, settings.currency)}</span></div>
         )}
+        {sale.paymentMethod === 'mpesa' && sale.mpesaReceipt && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)' }}><span>M-Pesa receipt</span><span>{sale.mpesaReceipt}</span></div>
+        )}
         <div style={{ textAlign: 'center', color: 'var(--muted)', marginTop: 12 }}>Thank you — get well soon</div>
         <button onClick={onClose} style={{ width: '100%', marginTop: 16, padding: '10px 0', borderRadius: 8, border: 'none', background: 'var(--pine)', color: '#fff', fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>New sale</button>
       </div>
@@ -979,13 +779,12 @@ function ReceiptModal({ sale, settings, onClose }) {
 /* ---------------------------------------------------------------------- */
 
 function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, lastSynced,
-  saveInventory, saveStaff, saveSettings, isOnline, isSyncing, offlineQueue, processQueue }) {
+  saveInventory, saveStaff, saveSettings }) {
   const [tab, setTab] = useState('dashboard');
   const navItems = [
     { key: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
-    { key: 'salesSummary', label: 'Sales Summary', Icon: TrendingUp },
     { key: 'inventory', label: 'Inventory', Icon: Package },
-    { key: 'sales', label: 'Sales History', Icon: ClipboardList },
+    { key: 'sales', label: 'Sales history', Icon: ClipboardList },
     { key: 'staff', label: 'Staff', Icon: Users },
     { key: 'settings', label: 'Settings', Icon: SettingsIcon },
   ];
@@ -993,17 +792,7 @@ function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, l
   return (
     <div className="pos-root" style={{ minHeight: '100vh' }}>
       <style>{STYLES}</style>
-      <TopBar
-        settings={settings}
-        user={user}
-        onLogout={onLogout}
-        lastSynced={lastSynced}
-        isOnline={isOnline}
-        isSyncing={isSyncing}
-        offlineQueue={offlineQueue}
-        processQueue={processQueue}
-        right={null}
-      />
+      <TopBar settings={settings} user={user} onLogout={onLogout} lastSynced={lastSynced} right={null} />
       <div className="pos-admin-layout">
         <div className="pos-admin-nav">
           {navItems.map(({ key, label, Icon }) => (
@@ -1016,10 +805,9 @@ function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, l
         </div>
         <div className="pos-admin-content pos-scroll">
           {tab === 'dashboard' && <DashboardTab inventory={inventory} sales={sales} settings={settings} />}
-          {tab === 'salesSummary' && <SalesSummaryTab sales={sales} settings={settings} />}
           {tab === 'inventory' && <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} />}
           {tab === 'sales' && <SalesTab sales={sales} settings={settings} />}
-          {tab === 'staff' && <StaffTab staffList={staffList} saveStaff={saveStaff} user={user} />}
+          {tab === 'staff' && <StaffTab staffList={staffList} saveStaff={saveStaff} />}
           {tab === 'settings' && <SettingsTab settings={settings} saveSettings={saveSettings} />}
         </div>
       </div>
@@ -1226,931 +1014,12 @@ function SalesTab({ sales, settings }) {
   );
 }
 
-function SalesSummaryTab({ sales, settings }) {
-  const [range, setRange] = useState('today'); // today, yesterday, thisWeek, lastWeek, thisMonth, lastMonth, custom
-  const [customFrom, setCustomFrom] = useState('');
-  const [customTo, setCustomTo] = useState('');
-
-  // Helper functions for date manipulation (since we don't have date-fns, we'll implement simple versions)
-  const startOfDay = (date) => {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  };
-
-  const endOfDay = (date) => {
-    const d = new Date(date);
-    d.setHours(23, 59, 59, 999);
-    return d;
-  };
-
-  const startOfWeek = (date) => {
-    const d = new Date(date);
-    const day = d.getDay(); // 0 (Sunday) to 6 (Saturday)
-    const diff = d.getDate() - day + (day === 0 ? -6 : 1); // adjust when day is Sunday
-    d.setDate(diff);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  };
-
-  const endOfWeek = (date) => {
-    const d = new Date(date);
-    const day = d.getDay();
-    const diff = d.getDate() + (6 - day) + (day === 0 ? 7 : 0); // adjust for Sunday
-    d.setDate(diff);
-    d.setHours(23, 59, 59, 999);
-    return d;
-  };
-
-  const startOfMonth = (date) => {
-    const d = new Date(date);
-    d.setDate(1);
-    d.setHours(0, 0, 0, 0);
-    return d;
-  };
-
-  const endOfMonth = (date) => {
-    const d = new Date(date);
-    d.setMonth(d.getMonth() + 1, 0);
-    d.setHours(23, 59, 59, 999);
-    return d;
-  };
-
-  const subDays = (date, days) => {
-    const d = new Date(date);
-    d.setDate(d.getDate() - days);
-    return d;
-  };
-
-  const subWeeks = (date, weeks) => {
-    const d = new Date(date);
-    d.setDate(d.getDate() - 7 * weeks);
-    return d;
-  };
-
-  const subMonths = (date, months) => {
-    const d = new Date(date);
-    d.setMonth(d.getMonth() - months);
-    return d;
-  };
-
-  // Get start and end dates for the selected range
-  const getDateRange = () => {
-    const now = new Date();
-    let start, end;
-
-    switch (range) {
-      case 'today':
-        start = startOfDay(now);
-        end = endOfDay(now);
-        break;
-      case 'yesterday':
-        const yesterday = subDays(now, 1);
-        start = startOfDay(yesterday);
-        end = endOfDay(yesterday);
-        break;
-      case 'thisWeek':
-        start = startOfWeek(now);
-        end = endOfWeek(now);
-        break;
-      case 'lastWeek':
-        const lastWeek = subWeeks(now, 1);
-        start = startOfWeek(lastWeek);
-        end = endOfWeek(lastWeek);
-        break;
-      case 'thisMonth':
-        start = startOfMonth(now);
-        end = endOfMonth(now);
-        break;
-      case 'lastMonth':
-        const lastMonth = subMonths(now, 1);
-        start = startOfMonth(lastMonth);
-        end = endOfMonth(lastMonth);
-        break;
-      case 'custom':
-        start = customFrom ? new Date(customFrom) : null;
-        end = customTo ? new Date(customTo + 'T23:59:59') : null;
-        break;
-      default:
-        start = startOfDay(now);
-        end = endOfDay(now);
-    }
-
-    return { start, end };
-  };
-
-  const { start, end } = getDateRange();
-
-  // Filter sales by date range
-  const filteredSales = sales.filter((sale) => {
-    const saleDate = new Date(sale.timestamp);
-    if (start && saleDate < start) return false;
-    if (end && saleDate > end) return false;
-    return true;
-  });
-
-  // Calculate summary statistics
-  const totalRevenue = filteredSales.reduce((sum, sale) => sum + sale.total, 0);
-  const transactionCount = filteredSales.length;
-  const averageTransactionValue = transactionCount > 0 ? totalRevenue / transactionCount : 0;
-
-  // Sales by payment method
-  const paymentMethodMap = {};
-  filteredSales.forEach((sale) => {
-    const method = sale.paymentMethod;
-    if (!paymentMethodMap[method]) {
-      paymentMethodMap[method] = { count: 0, total: 0 };
-    }
-    paymentMethodMap[method].count += 1;
-    paymentMethodMap[method].total += sale.total;
-  });
-  const paymentMethodData = Object.entries(paymentMethodMap).map(([method, data]) => ({
-    method,
-    count: data.count,
-    total: data.total,
-    percentage: transactionCount > 0 ? (data.count / transactionCount) * 100 : 0,
-  }));
-
-  // Top selling products (by quantity sold)
-  const productQuantities = {};
-  filteredSales.forEach((sale) => {
-    sale.items.forEach((item) => {
-      if (!productQuantities[item.id]) {
-        productQuantities[item.id] = { name: item.name, quantity: 0 };
-      }
-      productQuantities[item.id].quantity += item.qty;
-    });
-  });
-  const topProducts = Object.entries(productQuantities)
-    .map(([id, data]) => ({ id, name: data.name, quantity: data.quantity }))
-    .sort((a, b) => b.quantity - a.quantity)
-    .slice(0, 5); // top 5
-
-  // Sales by category
-  const categorySales = {};
-  filteredSales.forEach((sale) => {
-    sale.items.forEach((item) => {
-      // Find category from inventory (we need to get it from somewhere)
-      // For now, we'll use a placeholder - in a real app, we'd have category in the sale item
-      const category = 'General'; // Placeholder
-      if (!categorySales[category]) {
-        categorySales[category] = { count: 0, total: 0, quantity: 0 };
-      }
-      categorySales[category].count += 1;
-      categorySales[category].total += item.price * item.qty;
-      categorySales[category].quantity += item.qty;
-    });
-  });
-  const categoryData = Object.entries(categorySales).map(([category, data]) => ({
-    category,
-    count: data.count,
-    total: data.total,
-    quantity: data.quantity,
-    percentage: transactionCount > 0 ? (data.count / transactionCount) * 100 : 0,
-  }));
-
-  // Staff performance
-  const staffSales = {};
-  filteredSales.forEach((sale) => {
-    const cashier = sale.cashier || 'Unknown';
-    if (!staffSales[cashier]) {
-      staffSales[cashier] = { count: 0, total: 0 };
-    }
-    staffSales[cashier].count += 1;
-    staffSales[cashier].total += sale.total;
-  });
-  const staffData = Object.entries(staffSales).map(([cashier, data]) => ({
-    cashier,
-    count: data.count,
-    total: data.total,
-    average: data.count > 0 ? data.total / data.count : 0,
-    percentage: transactionCount > 0 ? (data.count / transactionCount) * 100 : 0,
-  }));
-
-  // Hourly breakdown (for today/yesterday views)
-  const hourlySales = {};
-  const isDailyView = range === 'today' || range === 'yesterday';
-  if (isDailyView) {
-    filteredSales.forEach((sale) => {
-      const hour = new Date(sale.timestamp).getHours();
-      if (!hourlySales[hour]) {
-        hourlySales[hour] = { count: 0, total: 0 };
-      }
-      hourlySales[hour].count += 1;
-      hourlySales[hour].total += sale.total;
-    });
-  }
-  const hourlyData = Object.entries(hourlySales)
-    .map(([hour, data]) => ({
-      hour: parseInt(hour),
-      count: data.count,
-      total: data.total,
-    }))
-    .sort((a, b) => a.hour - b.hour);
-
-  // Sales by period (for comparison)
-  const periodLabels = ['Today', 'Yesterday', 'This Week', 'Last Week', 'This Month', 'Last Month'];
-  const periodValues = [
-    getPeriodSales('today'),
-    getPeriodSales('yesterday'),
-    getPeriodSales('thisWeek'),
-    getPeriodSales('lastWeek'),
-    getPeriodSales('thisMonth'),
-    getPeriodSales('lastMonth'),
-  ];
-
-  // Helper to get sales for a specific period (relative to now)
-  const getPeriodSales = (period) => {
-    const now = new Date();
-    let start, end;
-    switch (period) {
-      case 'today':
-        start = startOfDay(now);
-        end = endOfDay(now);
-        break;
-      case 'yesterday':
-        const yesterday = subDays(now, 1);
-        start = startOfDay(yesterday);
-        end = endOfDay(yesterday);
-        break;
-      case 'thisWeek':
-        start = startOfWeek(now);
-        end = endOfWeek(now);
-        break;
-      case 'lastWeek':
-        const lastWeek = subWeeks(now, 1);
-        start = startOfWeek(lastWeek);
-        end = endOfWeek(lastWeek);
-        break;
-      case 'thisMonth':
-        start = startOfMonth(now);
-        end = endOfMonth(now);
-        break;
-      case 'lastMonth':
-        const lastMonth = subMonths(now, 1);
-        start = startOfMonth(lastMonth);
-        end = endOfMonth(lastMonth);
-        break;
-      default:
-        start = startOfDay(now);
-        end = endOfDay(now);
-    }
-    const salesInPeriod = sales.filter((sale) => {
-      const saleDate = new Date(sale.timestamp);
-      return saleDate >= start && saleDate <= end;
-    });
-    return salesInPeriod.reduce((sum, sale) => sum + sale.total, 0);
-  };
-
-  // CSV Export function
-  const exportToCSV = () => {
-    if (filteredSales.length === 0) {
-      alert('No data to export');
-      return;
-    }
-
-    // Create CSV header
-    const headers = [
-      'Sale ID',
-      'Timestamp',
-      'Cashier',
-      'Items',
-      'Subtotal',
-      'Tax',
-      'Total',
-      'Payment Method',
-      'Amount Tendered',
-      'Change'
-    ];
-
-    // Create CSV rows
-    const rows = filteredSales.map(sale => {
-      const itemsJson = JSON.stringify(sale.items);
-      return [
-        `"${sale.id}"`,
-        `"${sale.timestamp}"`,
-        `"${sale.cashier || ''}"`,
-        `"${itemsJson.replace(/"/g, '""')}"`,
-        sale.subtotal,
-        sale.tax,
-        sale.total,
-        `"${sale.paymentMethod || ''}"`,
-        sale.amountTendered !== undefined ? sale.amountTendered : '',
-        sale.change !== undefined ? sale.change : ''
-      ].join(',');
-    });
-
-    // Combine header and rows
-    const csvContent = [headers.join(','), ...rows].join('\n');
-
-    // Create Blob and download
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const filename = `medipoint_sales_${new Date().toISOString().slice(0,10)}.csv`;
-
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', filename);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-        <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>Sales Summary</h2>
-        <div style={{ display: 'flex', gap: 8 }}>
-          <button
-            onClick={exportToCSV}
-            disabled={filteredSales.length === 0}
-            style={{
-              background: 'var(--pine)',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              padding: '8px 12px',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: filteredSales.length === 0 ? 'not-allowed' : 'pointer',
-              opacity: filteredSales.length === 0 ? 0.7 : 1
-            }}
-          >
-            Export CSV
-          </button>
-        </div>
-      </div>
-
-      {/* Date range selector */}
-      <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px', marginBottom: 24 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
-          <button
-            onClick={() => setRange('today')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'today' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'today' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'today' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Today
-          </button>
-          <button
-            onClick={() => setRange('yesterday')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'yesterday' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'yesterday' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'yesterday' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Yesterday
-          </button>
-          <button
-            onClick={() => setRange('thisWeek')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'thisWeek' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'thisWeek' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'thisWeek' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            This Week
-          </button>
-          <button
-            onClick={() => setRange('lastWeek')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'lastWeek' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'lastWeek' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'lastWeek' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Last Week
-          </button>
-          <button
-            onClick={() => setRange('thisMonth')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'thisMonth' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'thisMonth' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'thisMonth' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            This Month
-          </button>
-          <button
-            onClick={() => setRange('lastMonth')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'lastMonth' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'lastMonth' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'lastMonth' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Last Month
-          </button>
-          <button
-            onClick={() => setRange('custom')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'custom' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'custom' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'custom' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Custom
-          </button>
-        </div>
-
-        {range === 'custom' && (
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <input
-              type="date"
-              value={customFrom}
-              onChange={(e) => setCustomFrom(e.target.value)}
-              placeholder="From"
-              style={{ flex: 1, minWidth: 120, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }}
-            />
-            <input
-              type="date"
-              value={customTo}
-              onChange={(e) => setCustomTo(e.target.value)}
-              placeholder="To"
-              style={{ flex: 1, minWidth: 120, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Total Revenue</div>
-          <div className="pos-serif" style={{ fontSize: 24, fontWeight: 700 }}>{formatMoney(totalRevenue, settings.currency)}</div>
-        </div>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Transactions</div>
-          <div className="pos-serif" style={{ fontSize: 24, fontWeight: 700 }}>{transactionCount}</div>
-        </div>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Average Transaction</div>
-          <div className="pos-serif" style={{ fontSize: 24, fontWeight: 700 }}>{formatMoney(averageTransactionValue, settings.currency)}</div>
-        </div>
-      </div>
-
-      {/* Hourly breakdown (for daily views) */}
-      {isDailyView && hourlyData.length > 0 && (
-        <div style={{ marginBottom: 24 }}>
-          <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Hourly Sales</h3>
-          <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(60px, 1fr))', gap: 8 }}>
-              {hourlyData.map(hour => (
-                <div key={hour.hour} style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>
-                    {hour.hour}:00
-                  </div>
-                  <div className="pos-serif" style={{ fontSize: 14, fontWeight: 600 }}>
-                    {formatMoney(hour.total, settings.currency)}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                    {hour.count} sale{hour.count !== 1 ? 's' : ''}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Payment method breakdown */}
-      <div style={{ marginBottom: 24 }}>
-        <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Payment Methods</h3>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          {paymentMethodData.length === 0 ? (
-            <p style={{ color: 'var(--muted)', fontSize: 13 }}>No transactions</p>
-          ) : (
-            <div>
-              {paymentMethodData.map((item) => (
-                <div key={item.method} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13 }}>
-                  <span>{item.method}</span>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <span>{formatMoney(item.total, settings.currency)}</span>
-                    <span>({item.count} transactions)</span>
-                    {item.percentage > 0 && (
-                      <span style={{ fontSize: 11, color: 'var(--muted)' }}>
-                        ({item.percentage.toFixed(1)}%)
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Category breakdown */}
-      <div style={{ marginBottom: 24 }}>
-        <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Sales by Category</h3>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          {categoryData.length === 0 ? (
-            <p style={{ color: 'var(--muted)', fontSize: 13 }}>No sales data</p>
-          ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-              {categoryData.map(cat => (
-                <div key={cat.category} style={{ display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-                    {cat.category}
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-                    {formatMoney(cat.total, settings.currency)}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                    {cat.quantity} units • {cat.count} transactions
-                    {cat.percentage > 0 && (
-                      <span style={{ marginLeft: 8 }}>
-                        ({cat.percentage.toFixed(1)}%)
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Staff performance */}
-      {staffData.length > 1 && (
-        <div style={{ marginBottom: 24 }}>
-          <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Staff Performance</h3>
-          <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12 }}>
-              {staffData.map(staff => (
-                <div key={staff.cashier} style={{ display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-                    {staff.cashier}
-                  </div>
-                  <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 4 }}>
-                    {formatMoney(staff.total, settings.currency)}
-                  </div>
-                  <div style={{ fontSize: 11, color: 'var(--muted)' }}>
-                    {staff.total > 0 ?
-                      `Avg: ${formatMoney(staff.average, settings.currency)}` :
-                      formatMoney(0, settings.currency)
-                    } • {staff.count} transaction{staff.count !== 1 ? 's' : ''}
-                    {staff.percentage > 0 && (
-                      <span style={{ marginLeft: 8 }}>
-                        ({staff.percentage.toFixed(1)}%)
-                      </span>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Top selling products */}
-      <div style={{ marginBottom: 24 }}>
-        <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Top Selling Products</h3>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          {topProducts.length === 0 ? (
-            <p style={{ color: 'var(--muted)', fontSize: 13 }}>No sales data</p>
-          ) : (
-            <div>
-              {topProducts.map((product, index) => (
-                <div key={product.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13 }}>
-                  <span>{product.name}</span>
-                  <span>{product.quantity} units</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Period comparison */}
-      <div>
-        <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Sales Comparison</h3>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12 }}>
-            {periodLabels.map((label, index) => (
-              <div key={index} style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>{label}</div>
-                <div className="pos-serif" style={{ fontSize: 18, fontWeight: 600 }}>{formatMoney(periodValues[index], settings.currency)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-const getPeriodSales = (period) => {
-      const now = new Date();
-      let start, end;
-      switch (period) {
-        case 'today':
-          start = startOfDay(now);
-          end = endOfDay(now);
-          break;
-        case 'yesterday':
-          const yesterday = subDays(now, 1);
-          start = startOfDay(yesterday);
-          end = endOfDay(yesterday);
-          break;
-        case 'thisWeek':
-          start = startOfWeek(now);
-          end = endOfWeek(now);
-          break;
-        case 'lastWeek':
-          const lastWeek = subWeeks(now, 1);
-          start = startOfWeek(lastWeek);
-          end = endOfWeek(lastWeek);
-          break;
-        case 'thisMonth':
-          start = startOfMonth(now);
-          end = endOfMonth(now);
-          break;
-        case 'lastMonth':
-          const lastMonth = subMonths(now, 1);
-          start = startOfMonth(lastMonth);
-          end = endOfMonth(lastMonth);
-          break;
-        default:
-          start = startOfDay(now);
-          end = endOfDay(now);
-      }
-    const salesInPeriod = sales.filter((sale) => {
-      const saleDate = new Date(sale.timestamp);
-      return saleDate >= start && saleDate <= end;
-    });
-    return salesInPeriod.reduce((sum, sale) => sum + sale.total, 0);
-  };
-
-  return (
-    <div>
-      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Sales Summary</h2>
-
-      {/* Date range selector */}
-      <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px', marginBottom: 24 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
-          <button
-            onClick={() => setRange('today')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'today' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'today' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'today' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Today
-          </button>
-          <button
-            onClick={() => setRange('yesterday')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'yesterday' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'yesterday' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'yesterday' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Yesterday
-          </button>
-          <button
-            onClick={() => setRange('thisWeek')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'thisWeek' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'thisWeek' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'thisWeek' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            This Week
-          </button>
-          <button
-            onClick={() => setRange('lastWeek')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'lastWeek' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'lastWeek' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'lastWeek' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Last Week
-          </button>
-          <button
-            onClick={() => setRange('thisMonth')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'thisMonth' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'thisMonth' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'thisMonth' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            This Month
-          </button>
-          <button
-            onClick={() => setRange('lastMonth')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'lastMonth' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'lastMonth' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'lastMonth' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Last Month
-          </button>
-          <button
-            onClick={() => setRange('custom')}
-            style={{
-              flex: 1,
-              minWidth: 80,
-              padding: '8px 12px',
-              borderRadius: 6,
-              border: range === 'custom' ? '2px solid var(--pine)' : '1px solid var(--border)',
-              background: range === 'custom' ? 'var(--pine-pale)' : '#fff',
-              color: range === 'custom' ? 'var(--pine)' : 'var(--ink)',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
-          >
-            Custom
-          </button>
-        </div>
-
-        {range === 'custom' && (
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <input
-              type="date"
-              value={customFrom}
-              onChange={(e) => setCustomFrom(e.target.value)}
-              placeholder="From"
-              style={{ flex: 1, minWidth: 120, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }}
-            />
-            <input
-              type="date"
-              value={customTo}
-              onChange={(e) => setCustomTo(e.target.value)}
-              placeholder="To"
-              style={{ flex: 1, minWidth: 120, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }}
-            />
-          </div>
-        )}
-      </div>
-
-      {/* Summary cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: 16, marginBottom: 24 }}>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Total Revenue</div>
-          <div className="pos-serif" style={{ fontSize: 24, fontWeight: 700 }}>{formatMoney(totalRevenue, settings.currency)}</div>
-        </div>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Transactions</div>
-          <div className="pos-serif" style={{ fontSize: 24, fontWeight: 700 }}>{transactionCount}</div>
-        </div>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 6 }}>Average Transaction</div>
-          <div className="pos-serif" style={{ fontSize: 24, fontWeight: 700 }}>{formatMoney(averageTransactionValue, settings.currency)}</div>
-        </div>
-      </div>
-
-      {/* Payment method breakdown */}
-      <div style={{ marginBottom: 24 }}>
-        <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Payment Methods</h3>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          {paymentMethodData.length === 0 ? (
-            <p style={{ color: 'var(--muted)', fontSize: 13 }}>No transactions</p>
-          ) : (
-            <div>
-              {paymentMethodData.map((item) => (
-                <div key={item.method} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13 }}>
-                  <span>{item.method}</span>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <span>{formatMoney(item.total, settings.currency)}</span>
-                    <span>({item.count} transactions)</span>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Top selling products */}
-      <div style={{ marginBottom: 24 }}>
-        <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Top Selling Products</h3>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          {topProducts.length === 0 ? (
-            <p style={{ color: 'var(--muted)', fontSize: 13 }}>No sales data</p>
-          ) : (
-            <div>
-              {topProducts.map((product, index) => (
-                <div key={product.id} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13 }}>
-                  <span>{product.name}</span>
-                  <span>{product.quantity} units</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Period comparison */}
-      <div>
-        <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Sales Comparison</h3>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: '16px' }}>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: 12 }}>
-            {periodLabels.map((label, index) => (
-              <div key={index} style={{ textAlign: 'center' }}>
-                <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 4 }}>{label}</div>
-                <div className="pos-serif" style={{ fontSize: 18, fontWeight: 600 }}>{formatMoney(periodValues[index], settings.currency)}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StaffTab({ staffList, saveStaff, user }) {
+function StaffTab({ staffList, saveStaff }) {
   const [name, setName] = useState('');
   const [pin, setPin] = useState('');
-  const [changePinOpen, setChangePinOpen] = useState(false);
-  const [newPin, setNewPin] = useState('');
-  const [confirmPin, setConfirmPin] = useState('');
-  const [pinError, setPinError] = useState('');
+  const [editingId, setEditingId] = useState(null);
+  const [editName, setEditName] = useState('');
+  const [editPin, setEditPin] = useState('');
 
   const add = () => {
     if (!name || pin.length !== 4) return;
@@ -2159,112 +1028,47 @@ function StaffTab({ staffList, saveStaff, user }) {
   };
   const remove = (id) => saveStaff(staffList.filter((s) => s.id !== id));
 
-  const handleSavePin = () => {
-    if (newPin !== confirmPin) {
-      setPinError('PINs do not match');
-      return;
-    }
-    if (!/^\d{4}$/.test(newPin)) {
-      setPinError('PIN must be exactly 4 digits');
-      return;
-    }
-    // Update the staff list
-    const updatedStaff = staffList.map(s =>
-      s.id === user.id ? { ...s, pin: newPin } : s
-    );
-    saveStaff(updatedStaff);
-    setChangePinOpen(false);
-    setPinError('');
-    setNewPin('');
-    setConfirmPin('');
+  const startEdit = (s) => { setEditingId(s.id); setEditName(s.name); setEditPin(s.pin); };
+  const cancelEdit = () => setEditingId(null);
+  const saveEdit = (id) => {
+    if (!editName || editPin.length !== 4) return;
+    saveStaff(staffList.map((s) => (s.id === id ? { ...s, name: editName, pin: editPin } : s)));
+    setEditingId(null);
   };
 
   return (
-    <>
-      <div>
-        <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Staff accounts</h2>
-        <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 20 }}>
-          {staffList.map((s) => (
+    <div>
+      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Staff accounts</h2>
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 20 }}>
+        {staffList.map((s) => (
+          editingId === s.id ? (
+            <div key={s.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid var(--border)' }}>
+              <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Full name"
+                style={{ flex: '1 1 140px', padding: '7px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 13 }} />
+              <input value={editPin} onChange={(e) => setEditPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="4-digit PIN"
+                style={{ width: 110, padding: '7px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 13 }} />
+              <button onClick={() => saveEdit(s.id)} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 7, padding: '7px 14px', fontSize: 12, fontWeight: 600 }}>Save</button>
+              <button onClick={cancelEdit} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 7, padding: '7px 14px', fontSize: 12, color: 'var(--muted)' }}>Cancel</button>
+            </div>
+          ) : (
             <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
               <span>{s.name} <span style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', marginLeft: 6 }}>{s.role}</span></span>
               <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                 <span className="pos-mono" style={{ color: 'var(--muted)' }}>PIN ••••</span>
+                <button onClick={() => startEdit(s)} title="Change name or PIN" style={{ background: 'none', border: 'none', color: 'var(--muted)' }}><Edit2 size={14} /></button>
                 {s.role !== 'admin' && <button onClick={() => remove(s.id)} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>}
-                {s.id === user.id && s.role === 'admin' && (
-                  <button onClick={() => {
-                    setChangePinOpen(true);
-                    setNewPin('');
-                    setConfirmPin('');
-                    setPinError('');
-                  }} style={{ background: 'none', border: 'none', color: 'var(--pine)' }}>
-                    Change PIN
-                  </button>
-                )}
               </span>
             </div>
-          ))}
-        </div>
-        <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Add cashier</h3>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" style={{ flex: 1, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
-          <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="4-digit PIN" style={{ width: 120, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
-          <button onClick={add} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 600 }}>Add</button>
-        </div>
+          )
+        ))}
       </div>
-
-      {/* Change PIN Modal */}
-      {changePinOpen && (
-        <div className="pos-modal-backdrop">
-          <div className="pos-modal" style={{ background: '#fff', borderRadius: 14, padding: 24, maxHeight: '80vh', overflowY: 'auto' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-              <span className="pos-serif" style={{ fontSize: 18, fontWeight: 700 }}>Change PIN</span>
-              <button onClick={() => setChangePinOpen(false)} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
-            </div>
-
-            {pinError && <p style={{ color: 'var(--red)', fontSize: 12, marginBottom: 12 }}>{pinError}</p>}
-
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 12, color: 'var(--muted)' }}>New PIN</label>
-              <input
-                type="password"
-                value={newPin}
-                onChange={(e) => setNewPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                inputMode="numeric"
-                autoComplete="off"
-                placeholder="Enter new 4-digit PIN"
-                style={{
-                  width: '100%', padding: '14px 16px', borderRadius: 10, fontSize: 18,
-                  border: '1px solid var(--border)',
-                  textAlign: 'center', letterSpacing: 4, marginBottom: 12, background: '#fff'
-                }}
-              />
-            </div>
-
-            <div style={{ marginBottom: 16 }}>
-              <label style={{ fontSize: 12, color: 'var(--muted)' }}>Confirm PIN</label>
-              <input
-                type="password"
-                value={confirmPin}
-                onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-                inputMode="numeric"
-                autoComplete="off"
-                placeholder="Confirm 4-digit PIN"
-                style={{
-                  width: '100%', padding: '14px 16px', borderRadius: 10, fontSize: 18,
-                  border: '1px solid var(--border)',
-                  textAlign: 'center', letterSpacing: 4, marginBottom: 12, background: '#fff'
-                }}
-              />
-            </div>
-
-            <button onClick={handleSavePin} disabled={!(newPin && confirmPin)} style={{
-              width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', fontSize: 15, fontWeight: 600,
-              background: newPin && confirmPin ? 'var(--pine)' : '#B9C4B4', color: '#fff'
-            }}>Save PIN</button>
-          </div>
-        </div>
-      )}
-    </>
+      <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Add cashier</h3>
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" style={{ flex: '1 1 140px', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+        <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="4-digit PIN" style={{ width: 120, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+        <button onClick={add} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 600 }}>Add</button>
+      </div>
+    </div>
   );
 }
 
@@ -2305,86 +1109,24 @@ function App() {
   const [staffList, setStaffList] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [lastSynced, setLastSynced] = useState('just now');
-  const [offlineQueue, setOfflineQueue] = useState([]);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const isOnlineRef = useRef(navigator.onLine);
+  const [pendingCount, setPendingCount] = useState(0);
   const pollRef = useRef(null);
   const sessionRestored = useRef(false);
 
-  // Offline queue persistence
-  useEffect(() => {
-    const savedQueue = localStorage.getItem('offline_queue');
-    if (savedQueue) {
-      try {
-        const parsed = JSON.parse(savedQueue);
-        setOfflineQueue(parsed);
-      } catch (e) {
-        console.error('Failed to parse offline queue from localStorage', e);
-        localStorage.removeItem('offline_queue');
-      }
-    }
-  }, []); // run once on mount
-
-  // Save queue to localStorage whenever it changes
-  useEffect(() => {
-    try {
-      localStorage.setItem('offline_queue', JSON.stringify(offlineQueue));
-    } catch (e) {
-      console.error('Failed to save offline queue to localStorage', e);
-    }
-  }, [offlineQueue]);
-
-  // Online/offline detection
-  useEffect(() => {
-    const handleOnline = () => {
-      isOnlineRef.current = true;
-      processQueue();
-    };
-    const handleOffline = () => {
-      isOnlineRef.current = false;
-    };
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    // Set initial state
-    isOnlineRef.current = navigator.onLine;
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
+  const refreshPending = () => setPendingCount(getDirtyKeys().length);
 
   const loadAll = useCallback(async () => {
-    // Create a promise that rejects after 10 seconds
-    const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Database connection timeout')), 10000)
-    );
-
-    try {
-      // Race the actual loading against the timeout
-      const [inv, sls, stf, cfg] = await Promise.race([
-        Promise.all([
-          getOrInit('inventory', DEFAULT_INVENTORY),
-          getOrInit('sales', []),
-          getOrInit('staff', DEFAULT_STAFF),
-          getOrInit('settings', DEFAULT_SETTINGS),
-        ]),
-        timeoutPromise
-      ]);
-
-      setInventory(inv); setSales(sls); setStaffList(stf); setSettings(cfg);
-      setLastSynced(new Date().toLocaleTimeString());
-      setReady(true);
-    } catch (error) {
-      console.error('Failed to load initial data:', error);
-      // Even if loading fails, set ready to true so the app Doesn't remain stuck
-      // Users can still use the app with default data, and data will sync when connection is restored
-      setInventory(DEFAULT_INVENTORY);
-      setSales([]);
-      setStaffList(DEFAULT_STAFF);
-      setSettings(DEFAULT_SETTINGS);
-      setLastSynced(new Date().toLocaleTimeString());
-      setReady(true); // Critical: always set ready to true to avoid permanent loading state
-    }
+    await flushDirtyKeys();
+    const [inv, sls, stf, cfg] = await Promise.all([
+      getOrInit('inventory', DEFAULT_INVENTORY),
+      getOrInit('sales', []),
+      getOrInit('staff', DEFAULT_STAFF),
+      getOrInit('settings', DEFAULT_SETTINGS),
+    ]);
+    setInventory(inv); setSales(sls); setStaffList(stf); setSettings(cfg);
+    setLastSynced(new Date().toLocaleTimeString());
+    refreshPending();
+    setReady(true);
   }, []);
 
   useEffect(() => {
@@ -2398,12 +1140,19 @@ function App() {
       })
       .subscribe();
 
-    // Slow fallback poll in case realtime is unavailable (e.g. not enabled on the table).
+    // Slow fallback poll — also doubles as the offline retry loop, in case
+    // realtime and the 'online' browser event both miss a reconnect.
     pollRef.current = setInterval(loadAll, 15000);
+
+    // React immediately when the browser regains a connection, instead of
+    // waiting for the next poll.
+    const handleOnline = () => loadAll();
+    window.addEventListener('online', handleOnline);
 
     return () => {
       clearInterval(pollRef.current);
       supabase.removeChannel(channel);
+      window.removeEventListener('online', handleOnline);
     };
   }, [loadAll]);
 
@@ -2431,99 +1180,26 @@ function App() {
     localStorage.removeItem(SESSION_KEY);
   };
 
-  // Offline queue helpers
-  const addToQueue = (operation) => {
-    setOfflineQueue(prev => {
-      const newQueue = [...prev, operation];
-      return newQueue;
-    });
-  };
-
-  const executeOperation = async (operation) => {
-    switch (operation.type) {
-      case 'SALE':
-        await saveShared('sales', [...(await getOrInit('sales', [])), operation.payload]);
-        break;
-      case 'INVENTORY':
-        await saveShared('inventory', operation.payload);
-        break;
-      case 'STAFF':
-        await saveShared('staff', operation.payload);
-        break;
-      case 'SETTINGS':
-        await saveShared('settings', operation.payload);
-        break;
-      case 'UPDATE_STOCK':
-        // For updateStock, we need to apply the stock deduction to the current inventory
-        const currentInventory = await getOrInit('inventory', []);
-        const newInventory = currentInventory.map((item) => {
-          const sold = operation.payload.find((op) => op.id === item.id);
-          return sold
-            ? { ...item, stock: Math.max(0, item.stock - sold.qty) }
-            : item;
-        });
-        await saveShared('inventory', newInventory);
-        break;
-      default:
-        throw new Error(`Unknown operation type: ${operation.type}`);
-    }
-  };
-
-  const processQueue = async () => {
-    if (!isOnlineRef.current || offlineQueue.length === 0) return;
-    setIsSyncing(true);
-    // Process operations in order
-    const failedOperations = [];
-    for (const operation of offlineQueue) {
-      try {
-        await executeOperation(operation);
-      } catch (error) {
-        console.error('Failed to process operation', operation, error);
-        failedOperations.push(operation);
-      }
-    }
-    // Update the queue with the failed operations
-    setOfflineQueue(failedOperations);
-    setIsSyncing(false);
-    setLastSynced(new Date().toLocaleTimeString());
-  };
-
   const saveInventory = async (next) => {
     setInventory(next);
-    if (isOnlineRef.current) {
-      await saveShared('inventory', next);
-      setLastSynced(new Date().toLocaleTimeString());
-    } else {
-      addToQueue({ type: 'INVENTORY', payload: next });
-    }
+    await saveShared('inventory', next);
+    setLastSynced(new Date().toLocaleTimeString());
   };
   const saveStaffList = async (next) => {
     setStaffList(next);
-    if (isOnlineRef.current) {
-      await saveShared('staff', next);
-      setLastSynced(new Date().toLocaleTimeString());
-    } else {
-      addToQueue({ type: 'STAFF', payload: next });
-    }
+    await saveShared('staff', next);
+    setLastSynced(new Date().toLocaleTimeString());
   };
   const saveSettingsFn = async (next) => {
     setSettings(next);
-    if (isOnlineRef.current) {
-      await saveShared('settings', next);
-      setLastSynced(new Date().toLocaleTimeString());
-    } else {
-      addToQueue({ type: 'SETTINGS', payload: next });
-    }
+    await saveShared('settings', next);
+    setLastSynced(new Date().toLocaleTimeString());
   };
   const addSale = async (sale) => {
     const next = [...sales, sale];
     setSales(next);
-    if (isOnlineRef.current) {
-      await saveShared('sales', next);
-      setLastSynced(new Date().toLocaleTimeString());
-    } else {
-      addToQueue({ type: 'SALE', payload: sale });
-    }
+    await saveShared('sales', next);
+    setLastSynced(new Date().toLocaleTimeString());
   };
   const updateStock = async (items) => {
     const next = inventory.map((p) => {
@@ -2531,12 +1207,7 @@ function App() {
       return sold ? { ...p, stock: Math.max(0, p.stock - sold.qty) } : p;
     });
     setInventory(next);
-    if (isOnlineRef.current) {
-      await saveShared('inventory', next);
-      setLastSynced(new Date().toLocaleTimeString());
-    } else {
-      addToQueue({ type: 'UPDATE_STOCK', payload: items });
-    }
+    await saveShared('inventory', next);
   };
 
   if (!ready) {
@@ -2548,95 +1219,21 @@ function App() {
     );
   }
 
-  // Offline warning banner
-  const offlineWarning = !isOnlineRef.current && (
-    <div style={{
-      position: 'fixed',
-      bottom: 0,
-      left: 0,
-      right: 0,
-      background: 'var(--amber)',
-      color: 'var(--ink-inverted)',
-      padding: '8px 16px',
-      textAlign: 'center',
-      fontSize: 14,
-      zIndex: 1000,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: '12px'
-    }}>
-      <div>��⚠��️ Offline - Changes will sync when connection is restored</div>
-      {offlineQueue.length > 0 && (
-        <button
-          onClick={processQueue}
-          style={{
-            background: 'var(--ink-inverted)',
-            color: 'var(--amber)',
-            border: 'none',
-            borderRadius: '4px',
-            padding: '4px 12px',
-            fontSize: 13,
-            fontWeight: 600,
-            cursor: 'pointer'
-          }}
-        >
-          Sync Now ({offlineQueue.length})
-        </button>
-      )}
-    </div>
-  );
-
   if (!user) {
-    return (
-      <>
-        <LoginScreen staffList={staffList} settings={settings} onLogin={handleLogin} />
-        {offlineWarning}
-      </>
-    );
+    return <LoginScreen staffList={staffList} settings={settings} onLogin={handleLogin} />;
   }
 
   if (user.role === 'admin') {
     return (
-      <>
-        <AdminConsole
-          inventory={inventory}
-          sales={sales}
-          staffList={staffList}
-          settings={settings}
-          user={user}
-          onLogout={handleLogout}
-          lastSynced={lastSynced}
-          saveInventory={saveInventory}
-          saveStaff={saveStaffList}
-          saveSettings={saveSettingsFn}
-          isOnline={isOnlineRef.current}
-          isSyncing={isSyncing}
-          offlineQueue={offlineQueue}
-          processQueue={processQueue}
-        />
-        {offlineWarning}
-      </>
+      <AdminConsole inventory={inventory} sales={sales} staffList={staffList} settings={settings}
+        user={user} onLogout={handleLogout} lastSynced={lastSynced}
+        saveInventory={saveInventory} saveStaff={saveStaffList} saveSettings={saveSettingsFn} />
     );
   }
 
   return (
-    <>
-      <StaffPOS
-        inventory={inventory}
-        settings={settings}
-        user={user}
-        addSale={addSale}
-        updateStock={updateStock}
-        lastSynced={lastSynced}
-        onLogout={handleLogout}
-        isOnline={isOnlineRef.current}
-        isSyncing={isSyncing}
-        offlineQueue={offlineQueue}
-        processQueue={processQueue}
-      />
-      {offlineWarning}
-    </>
+    <StaffPOS inventory={inventory} settings={settings} user={user}
+      addSale={addSale} updateStock={updateStock} lastSynced={lastSynced} onLogout={handleLogout} />
   );
 }
 
@@ -2648,11 +1245,11 @@ function ConfigMissing() {
   return (
     <div style={{
       minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontFamily: 'Inter, sans-serif', padding: 24, background: 'var(--bg)'
+      fontFamily: 'Inter, sans-serif', padding: 24, background: '#EEF1EA'
     }}>
-      <div style={{ maxWidth: 460, background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 14, padding: 28 }}>
+      <div style={{ maxWidth: 460, background: '#FBF9F3', border: '1px solid #D9DFD4', borderRadius: 14, padding: 28 }}>
         <h1 style={{ fontSize: 18, marginBottom: 10 }}>Almost there</h1>
-        <p style={{ fontSize: 14, color: 'var(--muted)', lineHeight: 1.5 }}>
+        <p style={{ fontSize: 14, color: '#444', lineHeight: 1.5 }}>
           {configCheck.reason} See <code>SETUP-GUIDE.md</code> for exact steps.
         </p>
       </div>
