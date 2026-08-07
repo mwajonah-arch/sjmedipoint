@@ -7,7 +7,6 @@ import {
   ClipboardList
 } from 'https://esm.sh/lucide-react@0.383.0?deps=react@18';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-import './styles.css';
 
 /* ---------------------------------------------------------------------- */
 /* Supabase connection                                                    */
