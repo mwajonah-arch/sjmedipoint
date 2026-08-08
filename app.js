@@ -4,7 +4,7 @@ import {
   ShoppingCart, Plus, Minus, Trash2, Search, LogOut, Package, TrendingUp,
   AlertTriangle, Users, Settings as SettingsIcon, Receipt, CheckCircle, X,
   Pill, Edit2, ChevronRight, Banknote, CreditCard, Smartphone, LayoutDashboard,
-  ClipboardList
+  ClipboardList, Info
 } from 'https://esm.sh/lucide-react@0.383.0?deps=react@18';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -380,6 +380,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
   const [receipt, setReceipt] = useState(null);
   const [cartOpen, setCartOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
+  const [drugInfoProduct, setDrugInfoProduct] = useState(null);
 
   const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()));
   const myTodayRevenue = myTodaySales.reduce((sum, s) => sum + s.total, 0);
@@ -476,11 +477,14 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
               const low = p.stock <= p.reorderLevel;
               const out = p.stock <= 0;
               return (
-                <button key={p.id} onClick={() => addToCart(p)} disabled={out} style={{
+                <div key={p.id} onClick={() => !out && addToCart(p)} role="button" tabIndex={0} style={{
                   textAlign: 'left', background: 'var(--paper)', border: '1px dashed var(--border)',
                   borderRadius: 10, padding: '14px 14px 12px', position: 'relative',
                   opacity: out ? 0.5 : 1, cursor: out ? 'not-allowed' : 'pointer'
                 }}>
+                  <button onClick={(e) => { e.stopPropagation(); setDrugInfoProduct(p); }} title="AI dosage / side effects / interactions lookup" style={{
+                    position: 'absolute', top: 8, left: 8, background: 'none', border: 'none', color: 'var(--muted)', padding: 4
+                  }}><Info size={14} /></button>
                   {p.requiresRx && (
                     <span style={{
                       position: 'absolute', top: 10, right: 10, fontSize: 10, fontWeight: 700,
@@ -488,7 +492,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                       padding: '1px 5px', transform: 'rotate(4deg)'
                     }}>℞ Rx</span>
                   )}
-                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', marginBottom: 4 }}>{p.category}</div>
+                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', marginBottom: 4, marginLeft: 18 }}>{p.category}</div>
                   <div className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 6, lineHeight: 1.25 }}>{p.name}</div>
                   <div className="pos-mono" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{p.sku}</div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -499,7 +503,8 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                       color: out ? 'var(--red)' : low ? 'var(--amber)' : 'var(--pine)'
                     }}>{out ? 'Out of stock' : low ? `${p.stock} left` : `${p.stock} in stock`}</span>
                   </div>
-                </button>
+                </div>
+
               );
             })}
             {filtered.length === 0 && <p style={{ color: 'var(--muted)', fontSize: 14 }}>No products match your search.</p>}
@@ -574,6 +579,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       )}
       {receipt && <ReceiptModal sale={receipt} settings={settings} onClose={() => { setReceipt(null); setCartOpen(false); }} />}
       {summaryOpen && <CashierSummaryModal sales={sales} settings={settings} user={user} onClose={() => setSummaryOpen(false)} />}
+      {drugInfoProduct && <DrugInfoModal product={drugInfoProduct} onClose={() => setDrugInfoProduct(null)} />}
     </div>
   );
 }
@@ -655,6 +661,96 @@ function CashierSummaryModal({ sales, settings, user, onClose }) {
                 <span className="pos-mono">{formatMoney(s.total, settings.currency)}</span>
               </div>
             ))}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// AI-assisted pharmacology reference lookup. Results are cached in this
+// browser (drug info rarely changes) to avoid repeat API calls/cost, but
+// always shown with a disclaimer — this is a reference aid, not a
+// substitute for the product's package insert or a pharmacist's judgment.
+function DrugInfoModal({ product, onClose }) {
+  const [state, setState] = useState('loading'); // loading | done | error
+  const [info, setInfo] = useState(null);
+  const [error, setError] = useState('');
+  const cacheKey = 'pos_drug_info_' + product.name.toLowerCase().trim();
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const cached = readCache(cacheKey);
+    if (cached) {
+      setInfo(cached);
+      setState('done');
+      return;
+    }
+
+    (async () => {
+      try {
+        const { data, error: fnError } = await supabase.functions.invoke('drug-info', { body: { drugName: product.name } });
+        if (cancelled) return;
+        if (fnError || !data || data.error) {
+          setError((data && data.error) || (fnError && fnError.message) || 'Could not fetch drug information.');
+          setState('error');
+          return;
+        }
+        setInfo(data);
+        writeCache(cacheKey, data);
+        setState('done');
+      } catch (e) {
+        if (!cancelled) { setError('Could not reach the AI lookup service.'); setState('error'); }
+      }
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [product.name]);
+
+  const Field = ({ label, value }) => (
+    <div style={{ marginBottom: 14 }}>
+      <div style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', marginBottom: 4 }}>{label}</div>
+      <div style={{ fontSize: 13, lineHeight: 1.5 }}>{value}</div>
+    </div>
+  );
+
+  return (
+    <div className="pos-modal-backdrop">
+      <div className="pos-modal" style={{ background: '#fff', borderRadius: 14, padding: 24, maxHeight: '85vh', overflowY: 'auto' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+          <span className="pos-serif" style={{ fontSize: 18, fontWeight: 700 }}>{product.name}{product.requiresRx ? ' ℞' : ''}</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>AI-generated reference · not medical advice</div>
+
+        {state === 'loading' && (
+          <div style={{ textAlign: 'center', padding: '24px 0' }}>
+            <div style={{ width: 30, height: 30, margin: '0 auto 10px', border: '3px solid var(--pine-pale)', borderTopColor: 'var(--pine)', borderRadius: '50%', animation: 'pos-spin 0.8s linear infinite' }} />
+            <p style={{ fontSize: 13, color: 'var(--muted)' }}>Looking this up…</p>
+          </div>
+        )}
+
+        {state === 'error' && (
+          <div>
+            <p style={{ fontSize: 13, color: 'var(--red)', marginBottom: 4 }}>{error}</p>
+            <p style={{ fontSize: 12, color: 'var(--muted)' }}>Check the product's package insert, or ask the pharmacist-in-charge.</p>
+          </div>
+        )}
+
+        {state === 'done' && info && (
+          <>
+            {info.notARealDrug && (
+              <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 12, fontStyle: 'italic' }}>This doesn't look like a medicine — showing what I could find anyway.</p>
+            )}
+            <Field label="Typical dosage" value={info.dosage} />
+            <Field label="Common side effects" value={info.sideEffects} />
+            <Field label="Interactions" value={info.interactions} />
+            <Field label="Other considerations" value={info.considerations} />
+            <div style={{ marginTop: 4, padding: 10, background: 'var(--amber-pale)', borderRadius: 8, fontSize: 11.5, color: '#5C3A12', lineHeight: 1.4 }}>
+              This is AI-generated reference information, not a clinical decision. Always verify against the product's official package insert, a current formulary, or the pharmacist-in-charge before advising a customer or dispensing.
+            </div>
           </>
         )}
       </div>
@@ -1032,6 +1128,7 @@ const emptyProduct = { name: '', category: '', sku: '', price: '', stock: '', re
 
 function InventoryTab({ inventory, settings, saveInventory }) {
   const [modalProduct, setModalProduct] = useState(null); // null = closed, {} = new, obj = edit
+  const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [query, setQuery] = useState('');
 
   const filtered = inventory.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || p.sku.toLowerCase().includes(query.toLowerCase()));
@@ -1060,11 +1157,11 @@ function InventoryTab({ inventory, settings, saveInventory }) {
 
       <div className="pos-table-scroll" style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12 }}>
         <div style={{ minWidth: 640 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 60px', padding: '10px 16px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 84px', padding: '10px 16px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
             <span>Product</span><span>Category</span><span>SKU</span><span>Price</span><span>Stock</span><span>Expiry</span><span></span>
           </div>
           {filtered.map((p) => (
-            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 60px', padding: '10px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 84px', padding: '10px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
               <span>{p.name}{p.requiresRx ? ' ℞' : ''}</span>
               <span style={{ color: 'var(--muted)' }}>{p.category}</span>
               <span className="pos-mono" style={{ fontSize: 12 }}>{p.sku}</span>
@@ -1072,6 +1169,7 @@ function InventoryTab({ inventory, settings, saveInventory }) {
               <span style={{ color: p.stock <= p.reorderLevel ? 'var(--red)' : 'var(--ink)' }}>{p.stock}</span>
               <span style={{ color: 'var(--muted)', fontSize: 12 }}>{p.expiry}</span>
               <span style={{ display: 'flex', gap: 6 }}>
+                <button onClick={() => setDrugInfoProduct(p)} title="AI dosage / side effects / interactions lookup" style={{ background: 'none', border: 'none', color: 'var(--pine)' }}><Info size={14} /></button>
                 <button onClick={() => setModalProduct(p)} style={{ background: 'none', border: 'none', color: 'var(--muted)' }}><Edit2 size={14} /></button>
                 <button onClick={() => remove(p.id)} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>
               </span>
@@ -1081,6 +1179,7 @@ function InventoryTab({ inventory, settings, saveInventory }) {
       </div>
 
       {modalProduct && <ProductModal product={modalProduct} onClose={() => setModalProduct(null)} onSave={upsert} />}
+      {drugInfoProduct && <DrugInfoModal product={drugInfoProduct} onClose={() => setDrugInfoProduct(null)} />}
     </div>
   );
 }
