@@ -59,8 +59,8 @@ const DEFAULT_INVENTORY = [
 
 const DEFAULT_STAFF = [
   { id: 's1', name: 'Admin', pin: '1234', role: 'admin' },
-  { id: 's2', name: 'Grace Wanjiru', pin: '1111', role: 'staff' },
-  { id: 's3', name: 'Kevin Otieno', pin: '2222', role: 'staff' },
+  { id: 's2', name: 'Grace Wanjiru', pin: '1111', role: 'staff', canManageInventory: false },
+  { id: 's3', name: 'Kevin Otieno', pin: '2222', role: 'staff', canManageInventory: false },
 ];
 
 const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxRate: 16 };
@@ -372,7 +372,7 @@ function TopBar({ settings, user, onLogout, lastSynced, right }) {
 /* Staff / Cashier POS                                                     */
 /* ---------------------------------------------------------------------- */
 
-function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, lastSynced, onLogout }) {
+function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, lastSynced, onLogout, saveInventory }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [cart, setCart] = useState([]);
@@ -381,6 +381,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
   const [cartOpen, setCartOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
+  const [inventoryOpen, setInventoryOpen] = useState(false);
 
   const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()));
   const myTodayRevenue = myTodaySales.reduce((sum, s) => sum + s.total, 0);
@@ -462,6 +463,15 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
             <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
+            {user.canManageInventory && (
+              <button onClick={() => setInventoryOpen(true)} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
+                border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
+              }}>
+                <Package size={15} color="var(--pine)" />
+                Manage Inventory
+              </button>
+            )}
             <button onClick={() => setSummaryOpen(true)} style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
               border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
@@ -580,6 +590,14 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       {receipt && <ReceiptModal sale={receipt} settings={settings} onClose={() => { setReceipt(null); setCartOpen(false); }} />}
       {summaryOpen && <CashierSummaryModal sales={sales} settings={settings} user={user} onClose={() => setSummaryOpen(false)} />}
       {drugInfoProduct && <DrugInfoModal product={drugInfoProduct} onClose={() => setDrugInfoProduct(null)} />}
+      {inventoryOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 95, overflow: 'auto', padding: 20 }} className="pos-scroll">
+          <button onClick={() => setInventoryOpen(false)} style={{ marginBottom: 16, background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ChevronRight size={14} style={{ transform: 'rotate(180deg)' }} /> Back to sales
+          </button>
+          <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} />
+        </div>
+      )}
     </div>
   );
 }
@@ -1279,7 +1297,7 @@ function StaffTab({ staffList, saveStaff }) {
 
   const add = () => {
     if (!name || pin.length !== 4) return;
-    saveStaff([...staffList, { id: genId('s'), name, pin, role: 'staff' }]);
+    saveStaff([...staffList, { id: genId('s'), name, pin, role: 'staff', canManageInventory: false }]);
     setName(''); setPin('');
   };
   const remove = (id) => saveStaff(staffList.filter((s) => s.id !== id));
@@ -1290,6 +1308,10 @@ function StaffTab({ staffList, saveStaff }) {
     if (!editName || editPin.length !== 4) return;
     saveStaff(staffList.map((s) => (s.id === id ? { ...s, name: editName, pin: editPin } : s)));
     setEditingId(null);
+  };
+
+  const toggleInventoryAccess = (id, checked) => {
+    saveStaff(staffList.map((s) => (s.id === id ? { ...s, canManageInventory: checked } : s)));
   };
 
   return (
@@ -1307,9 +1329,19 @@ function StaffTab({ staffList, saveStaff }) {
               <button onClick={cancelEdit} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 7, padding: '7px 14px', fontSize: 12, color: 'var(--muted)' }}>Cancel</button>
             </div>
           ) : (
-            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, flexWrap: 'wrap', gap: 8 }}>
               <span>{s.name} <span style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', marginLeft: 6 }}>{s.role}</span></span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                {s.role !== 'admin' && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!s.canManageInventory}
+                      onChange={(e) => toggleInventoryAccess(s.id, e.target.checked)}
+                    />
+                    Can add inventory
+                  </label>
+                )}
                 <span className="pos-mono" style={{ color: 'var(--muted)' }}>PIN ••••</span>
                 <button onClick={() => startEdit(s)} title="Change name or PIN" style={{ background: 'none', border: 'none', color: 'var(--muted)' }}><Edit2 size={14} /></button>
                 {s.role !== 'admin' && <button onClick={() => remove(s.id)} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>}
@@ -1489,7 +1521,8 @@ function App() {
 
   return (
     <StaffPOS inventory={inventory} sales={sales} settings={settings} user={user}
-      addSale={addSale} updateStock={updateStock} lastSynced={lastSynced} onLogout={handleLogout} />
+      addSale={addSale} updateStock={updateStock} lastSynced={lastSynced} onLogout={handleLogout}
+      saveInventory={saveInventory} />
   );
 }
 
