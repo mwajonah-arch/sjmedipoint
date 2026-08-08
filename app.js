@@ -75,7 +75,7 @@ const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxR
 /* reports it's back online — until they successfully sync.               */
 /* ---------------------------------------------------------------------- */
 
-const STORE_KEYS = ['inventory', 'sales', 'staff', 'settings'];
+const STORE_KEYS = ['inventory', 'sales', 'staff', 'settings', 'inventoryLog'];
 const CACHE_PREFIX = 'pos_cache_';
 const DIRTY_PREFIX = 'pos_dirty_';
 
@@ -372,7 +372,7 @@ function TopBar({ settings, user, onLogout, lastSynced, right }) {
 /* Staff / Cashier POS                                                     */
 /* ---------------------------------------------------------------------- */
 
-function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, lastSynced, onLogout, saveInventory }) {
+function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, lastSynced, onLogout, saveInventory, logInventoryChange }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [cart, setCart] = useState([]);
@@ -595,7 +595,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
           <button onClick={() => setInventoryOpen(false)} style={{ marginBottom: 16, background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
             <ChevronRight size={14} style={{ transform: 'rotate(180deg)' }} /> Back to sales
           </button>
-          <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} />
+          <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} user={user} logInventoryChange={logInventoryChange} />
         </div>
       )}
     </div>
@@ -990,11 +990,12 @@ function ReceiptModal({ sale, settings, onClose }) {
 /* ---------------------------------------------------------------------- */
 
 function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, lastSynced,
-  saveInventory, saveStaff, saveSettings }) {
+  saveInventory, saveStaff, saveSettings, inventoryLog, logInventoryChange }) {
   const [tab, setTab] = useState('dashboard');
   const navItems = [
     { key: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
     { key: 'inventory', label: 'Inventory', Icon: Package },
+    { key: 'activity', label: 'Activity', Icon: Receipt },
     { key: 'sales', label: 'Sales history', Icon: ClipboardList },
     { key: 'staff', label: 'Staff', Icon: Users },
     { key: 'settings', label: 'Settings', Icon: SettingsIcon },
@@ -1016,7 +1017,8 @@ function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, l
         </div>
         <div className="pos-admin-content pos-scroll">
           {tab === 'dashboard' && <DashboardTab inventory={inventory} sales={sales} settings={settings} />}
-          {tab === 'inventory' && <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} />}
+          {tab === 'inventory' && <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} user={user} logInventoryChange={logInventoryChange} />}
+          {tab === 'activity' && <ActivityTab inventoryLog={inventoryLog} />}
           {tab === 'sales' && <SalesTab sales={sales} settings={settings} />}
           {tab === 'staff' && <StaffTab staffList={staffList} saveStaff={saveStaff} />}
           {tab === 'settings' && <SettingsTab settings={settings} saveSettings={saveSettings} />}
@@ -1144,7 +1146,24 @@ function DashboardTab({ inventory, sales, settings }) {
 
 const emptyProduct = { name: '', category: '', sku: '', price: '', stock: '', reorderLevel: '', expiry: '', requiresRx: false };
 
-function InventoryTab({ inventory, settings, saveInventory }) {
+// Builds a short, human-readable summary of what changed between two
+// versions of a product — e.g. "Stock 40 → 60, Price KSh180 → KSh190".
+// Only reports fields that actually changed, so a name-only edit doesn't
+// show a wall of unchanged numbers.
+function summarizeProductChange(before, after, settings) {
+  const parts = [];
+  if (before.name !== after.name) parts.push(`Name "${before.name}" → "${after.name}"`);
+  if (Number(before.price) !== Number(after.price)) parts.push(`Price ${formatMoney(before.price, settings.currency)} → ${formatMoney(after.price, settings.currency)}`);
+  if (Number(before.stock) !== Number(after.stock)) parts.push(`Stock ${before.stock} → ${after.stock}`);
+  if (Number(before.reorderLevel) !== Number(after.reorderLevel)) parts.push(`Reorder level ${before.reorderLevel} → ${after.reorderLevel}`);
+  if (before.expiry !== after.expiry) parts.push(`Expiry ${before.expiry || '—'} → ${after.expiry || '—'}`);
+  if (before.category !== after.category) parts.push(`Category ${before.category} → ${after.category}`);
+  if (before.sku !== after.sku) parts.push(`SKU ${before.sku} → ${after.sku}`);
+  if (!!before.requiresRx !== !!after.requiresRx) parts.push(after.requiresRx ? 'Marked as Rx' : 'Unmarked as Rx');
+  return parts.length ? parts.join(', ') : 'No field changes';
+}
+
+function InventoryTab({ inventory, settings, saveInventory, user, logInventoryChange }) {
   const [modalProduct, setModalProduct] = useState(null); // null = closed, {} = new, obj = edit
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [query, setQuery] = useState('');
@@ -1153,14 +1172,43 @@ function InventoryTab({ inventory, settings, saveInventory }) {
 
   const upsert = (product) => {
     if (product.id) {
+      const before = inventory.find((p) => p.id === product.id);
       saveInventory(inventory.map((p) => (p.id === product.id ? product : p)));
+      if (logInventoryChange && before) {
+        logInventoryChange({
+          action: 'edit',
+          productName: product.name,
+          sku: product.sku,
+          detail: summarizeProductChange(before, product, settings),
+        });
+      }
     } else {
-      saveInventory([...inventory, { ...product, id: genId('p') }]);
+      const created = { ...product, id: genId('p') };
+      saveInventory([...inventory, created]);
+      if (logInventoryChange) {
+        logInventoryChange({
+          action: 'add',
+          productName: created.name,
+          sku: created.sku,
+          detail: `Added with ${created.stock} in stock at ${formatMoney(created.price, settings.currency)}`,
+        });
+      }
     }
     setModalProduct(null);
   };
 
-  const remove = (id) => saveInventory(inventory.filter((p) => p.id !== id));
+  const remove = (id) => {
+    const product = inventory.find((p) => p.id === id);
+    saveInventory(inventory.filter((p) => p.id !== id));
+    if (logInventoryChange && product) {
+      logInventoryChange({
+        action: 'delete',
+        productName: product.name,
+        sku: product.sku,
+        detail: `Removed (had ${product.stock} in stock)`,
+      });
+    }
+  };
 
   return (
     <div>
@@ -1231,6 +1279,65 @@ function ProductModal({ product, onClose, onSave }) {
           style={{ width: '100%', padding: '11px 0', borderRadius: 10, border: 'none', background: valid ? 'var(--pine)' : '#B9C4B4', color: '#fff', fontWeight: 600 }}>
           Save product
         </button>
+      </div>
+    </div>
+  );
+}
+
+const ACTIVITY_ACTION_META = {
+  add: { label: 'Added', color: 'var(--pine)', bg: 'var(--pine-pale)' },
+  edit: { label: 'Edited', color: 'var(--amber)', bg: 'var(--amber-pale)' },
+  delete: { label: 'Deleted', color: 'var(--red)', bg: 'var(--red-pale)' },
+};
+
+function ActivityTab({ inventoryLog }) {
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [staffFilter, setStaffFilter] = useState('All');
+
+  const staffNames = ['All', ...Array.from(new Set(inventoryLog.map((e) => e.staffName)))];
+
+  const filtered = inventoryLog.filter((e) => {
+    const d = new Date(e.timestamp);
+    if (from && d < new Date(from)) return false;
+    if (to && d > new Date(to + 'T23:59:59')) return false;
+    if (staffFilter !== 'All' && e.staffName !== staffFilter) return false;
+    return true;
+  }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  return (
+    <div>
+      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Inventory activity</h2>
+      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>Every product added, edited, or removed — by admin or staff with inventory access.</p>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+        <span style={{ color: 'var(--muted)', fontSize: 13 }}>to</span>
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+        <select value={staffFilter} onChange={(e) => setStaffFilter(e.target.value)} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }}>
+          {staffNames.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--muted)' }}>{filtered.length} change{filtered.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+        {filtered.length === 0 && <p style={{ padding: 16, fontSize: 13, color: 'var(--muted)' }}>No inventory changes in this range.</p>}
+        {filtered.map((e) => {
+          const meta = ACTIVITY_ACTION_META[e.action] || ACTIVITY_ACTION_META.edit;
+          return (
+            <div key={e.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap', gap: 6 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: meta.bg, color: meta.color }}>{meta.label}</span>
+                  <span style={{ fontWeight: 600 }}>{e.productName}</span>
+                  {e.sku && <span className="pos-mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{e.sku}</span>}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{e.staffName} · {new Date(e.timestamp).toLocaleString()}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', paddingLeft: 2 }}>{e.detail}</div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1395,6 +1502,7 @@ function App() {
   const [inventory, setInventory] = useState([]);
   const [sales, setSales] = useState([]);
   const [staffList, setStaffList] = useState([]);
+  const [inventoryLog, setInventoryLog] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [lastSynced, setLastSynced] = useState('just now');
   const [pendingCount, setPendingCount] = useState(0);
@@ -1405,13 +1513,14 @@ function App() {
 
   const loadAll = useCallback(async () => {
     await flushDirtyKeys();
-    const [inv, sls, stf, cfg] = await Promise.all([
+    const [inv, sls, stf, cfg, invLog] = await Promise.all([
       getOrInit('inventory', DEFAULT_INVENTORY),
       getOrInit('sales', []),
       getOrInit('staff', DEFAULT_STAFF),
       getOrInit('settings', DEFAULT_SETTINGS),
+      getOrInit('inventoryLog', []),
     ]);
-    setInventory(inv); setSales(sls); setStaffList(stf); setSettings(cfg);
+    setInventory(inv); setSales(sls); setStaffList(stf); setSettings(cfg); setInventoryLog(invLog);
     setLastSynced(new Date().toLocaleTimeString());
     refreshPending();
     setReady(true);
@@ -1473,6 +1582,18 @@ function App() {
     await saveShared('inventory', next);
     setLastSynced(new Date().toLocaleTimeString());
   };
+  const logInventoryChange = async ({ action, productName, sku, detail }) => {
+    const entry = {
+      id: genId('log'),
+      timestamp: new Date().toISOString(),
+      staffId: user?.id,
+      staffName: user?.name || 'Unknown',
+      action, productName, sku, detail,
+    };
+    const next = [...inventoryLog, entry];
+    setInventoryLog(next);
+    await saveShared('inventoryLog', next);
+  };
   const saveStaffList = async (next) => {
     setStaffList(next);
     await saveShared('staff', next);
@@ -1515,14 +1636,15 @@ function App() {
     return (
       <AdminConsole inventory={inventory} sales={sales} staffList={staffList} settings={settings}
         user={user} onLogout={handleLogout} lastSynced={lastSynced}
-        saveInventory={saveInventory} saveStaff={saveStaffList} saveSettings={saveSettingsFn} />
+        saveInventory={saveInventory} saveStaff={saveStaffList} saveSettings={saveSettingsFn}
+        inventoryLog={inventoryLog} logInventoryChange={logInventoryChange} />
     );
   }
 
   return (
     <StaffPOS inventory={inventory} sales={sales} settings={settings} user={user}
       addSale={addSale} updateStock={updateStock} lastSynced={lastSynced} onLogout={handleLogout}
-      saveInventory={saveInventory} />
+      saveInventory={saveInventory} logInventoryChange={logInventoryChange} />
   );
 }
 
