@@ -4,7 +4,7 @@ import {
   ShoppingCart, Plus, Minus, Trash2, Search, LogOut, Package, TrendingUp,
   AlertTriangle, Users, Settings as SettingsIcon, Receipt, CheckCircle, X,
   Pill, Edit2, ChevronRight, Banknote, CreditCard, Smartphone, LayoutDashboard,
-  ClipboardList, Info
+  ClipboardList, Info, ScanLine
 } from 'https://esm.sh/lucide-react@0.383.0?deps=react@18';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -42,19 +42,19 @@ const supabase = createClient(
 /* ---------------------------------------------------------------------- */
 
 const DEFAULT_INVENTORY = [
-  { id: 'p1', name: 'Paracetamol 500mg', category: 'Pain Relief', sku: 'PCM-500', price: 50, stock: 200, reorderLevel: 30, expiry: '2027-03-01', requiresRx: false },
-  { id: 'p2', name: 'Ibuprofen 400mg', category: 'Pain Relief', sku: 'IBU-400', price: 80, stock: 150, reorderLevel: 25, expiry: '2026-11-15', requiresRx: false },
-  { id: 'p3', name: 'Amoxicillin 500mg', category: 'Antibiotics', sku: 'AMX-500', price: 250, stock: 60, reorderLevel: 20, expiry: '2026-09-10', requiresRx: true },
-  { id: 'p4', name: 'Metformin 500mg', category: 'Diabetes', sku: 'MET-500', price: 180, stock: 40, reorderLevel: 15, expiry: '2027-01-20', requiresRx: true },
-  { id: 'p5', name: 'Amlodipine 5mg', category: 'Cardiovascular', sku: 'AML-5', price: 220, stock: 8, reorderLevel: 10, expiry: '2026-12-05', requiresRx: true },
-  { id: 'p6', name: 'Cetirizine 10mg', category: 'Allergy', sku: 'CET-10', price: 90, stock: 100, reorderLevel: 20, expiry: '2027-05-01', requiresRx: false },
-  { id: 'p7', name: 'Omeprazole 20mg', category: 'Digestive', sku: 'OMP-20', price: 150, stock: 55, reorderLevel: 15, expiry: '2026-10-18', requiresRx: true },
-  { id: 'p8', name: 'ORS Sachets', category: 'First Aid', sku: 'ORS-01', price: 40, stock: 300, reorderLevel: 50, expiry: '2027-08-01', requiresRx: false },
-  { id: 'p9', name: 'Vitamin C 1000mg', category: 'Vitamins', sku: 'VITC-1000', price: 350, stock: 70, reorderLevel: 15, expiry: '2027-02-14', requiresRx: false },
-  { id: 'p10', name: 'Cough Syrup 100ml', category: 'Respiratory', sku: 'CGH-100', price: 280, stock: 45, reorderLevel: 10, expiry: '2026-08-30', requiresRx: false },
-  { id: 'p11', name: 'Elastic Bandage', category: 'First Aid', sku: 'BND-01', price: 120, stock: 80, reorderLevel: 15, expiry: '2028-01-01', requiresRx: false },
-  { id: 'p12', name: 'Hand Sanitizer 250ml', category: 'Hygiene', sku: 'SNT-250', price: 200, stock: 90, reorderLevel: 20, expiry: '2028-06-01', requiresRx: false },
-  { id: 'p13', name: 'Multivitamin Syrup (Kids)', category: 'Vitamins', sku: 'MVK-100', price: 320, stock: 6, reorderLevel: 10, expiry: '2026-09-05', requiresRx: false },
+  { id: 'p1', name: 'Paracetamol 500mg', category: 'Pain Relief', sku: 'PCM-500', barcode: '6161100000017', price: 50, stock: 200, reorderLevel: 30, expiry: '2027-03-01', requiresRx: false },
+  { id: 'p2', name: 'Ibuprofen 400mg', category: 'Pain Relief', sku: 'IBU-400', barcode: '6161100000024', price: 80, stock: 150, reorderLevel: 25, expiry: '2026-11-15', requiresRx: false },
+  { id: 'p3', name: 'Amoxicillin 500mg', category: 'Antibiotics', sku: 'AMX-500', barcode: '6161100000031', price: 250, stock: 60, reorderLevel: 20, expiry: '2026-09-10', requiresRx: true },
+  { id: 'p4', name: 'Metformin 500mg', category: 'Diabetes', sku: 'MET-500', barcode: '6161100000048', price: 180, stock: 40, reorderLevel: 15, expiry: '2027-01-20', requiresRx: true },
+  { id: 'p5', name: 'Amlodipine 5mg', category: 'Cardiovascular', sku: 'AML-5', barcode: '6161100000055', price: 220, stock: 8, reorderLevel: 10, expiry: '2026-12-05', requiresRx: true },
+  { id: 'p6', name: 'Cetirizine 10mg', category: 'Allergy', sku: 'CET-10', barcode: '6161100000062', price: 90, stock: 100, reorderLevel: 20, expiry: '2027-05-01', requiresRx: false },
+  { id: 'p7', name: 'Omeprazole 20mg', category: 'Digestive', sku: 'OMP-20', barcode: '6161100000079', price: 150, stock: 55, reorderLevel: 15, expiry: '2026-10-18', requiresRx: true },
+  { id: 'p8', name: 'ORS Sachets', category: 'First Aid', sku: 'ORS-01', barcode: '6161100000086', price: 40, stock: 300, reorderLevel: 50, expiry: '2027-08-01', requiresRx: false },
+  { id: 'p9', name: 'Vitamin C 1000mg', category: 'Vitamins', sku: 'VITC-1000', barcode: '6161100000093', price: 350, stock: 70, reorderLevel: 15, expiry: '2027-02-14', requiresRx: false },
+  { id: 'p10', name: 'Cough Syrup 100ml', category: 'Respiratory', sku: 'CGH-100', barcode: '6161100000109', price: 280, stock: 45, reorderLevel: 10, expiry: '2026-08-30', requiresRx: false },
+  { id: 'p11', name: 'Elastic Bandage', category: 'First Aid', sku: 'BND-01', barcode: '6161100000116', price: 120, stock: 80, reorderLevel: 15, expiry: '2028-01-01', requiresRx: false },
+  { id: 'p12', name: 'Hand Sanitizer 250ml', category: 'Hygiene', sku: 'SNT-250', barcode: '6161100000123', price: 200, stock: 90, reorderLevel: 20, expiry: '2028-06-01', requiresRx: false },
+  { id: 'p13', name: 'Multivitamin Syrup (Kids)', category: 'Vitamins', sku: 'MVK-100', barcode: '6161100000130', price: 320, stock: 6, reorderLevel: 10, expiry: '2026-09-05', requiresRx: false },
 ];
 
 const DEFAULT_STAFF = [
@@ -190,6 +190,16 @@ function formatMoney(amount, currency) {
 function isSameDay(iso, ref) {
   const d = new Date(iso);
   return d.toDateString() === ref.toDateString();
+}
+
+// Exact-match lookup used by both the scanner-gun (keyboard wedge) flow and
+// the camera scanner — matches on the printed barcode first, falling back
+// to the internal SKU, since some scanned stock may only have one or the
+// other on file.
+function findProductByCode(inventory, code) {
+  const c = (code || '').trim().toLowerCase();
+  if (!c) return null;
+  return inventory.find((p) => (p.barcode && p.barcode.trim().toLowerCase() === c) || (p.sku && p.sku.trim().toLowerCase() === c)) || null;
 }
 
 function csvCell(value) {
@@ -452,14 +462,20 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [inventoryOpen, setInventoryOpen] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanFlash, setScanFlash] = useState(null);
+  const scanFlashTimer = useRef(null);
 
   const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()) && !s.voided);
   const myTodayRevenue = myTodaySales.reduce((sum, s) => sum + s.total, 0);
 
   const categories = ['All', ...Array.from(new Set(inventory.map((p) => p.category)))];
 
+  useEffect(() => () => clearTimeout(scanFlashTimer.current), []);
+
   const filtered = inventory.filter((p) => {
-    const matchQ = p.name.toLowerCase().includes(query.toLowerCase()) || p.sku.toLowerCase().includes(query.toLowerCase());
+    const q = query.toLowerCase();
+    const matchQ = p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || (p.barcode || '').toLowerCase().includes(q);
     const matchC = category === 'All' || p.category === category;
     return matchQ && matchC;
   });
@@ -474,6 +490,30 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       }
       return [...c, { id: product.id, name: product.name, price: product.price, qty: 1, requiresRx: product.requiresRx, maxStock: product.stock }];
     });
+  };
+
+  // Handles a scanned code from either source: a USB/Bluetooth scanner gun
+  // (which types into the search box and sends Enter) or the camera
+  // scanner modal. Shows a brief flash so the cashier gets feedback
+  // without looking away from the basket they're scanning into.
+  const flashScan = (type, text) => {
+    setScanFlash({ type, text });
+    clearTimeout(scanFlashTimer.current);
+    scanFlashTimer.current = setTimeout(() => setScanFlash(null), 2200);
+  };
+
+  const handleScanCode = (code) => {
+    const match = findProductByCode(inventory, code);
+    if (!match) {
+      flashScan('error', `No product matches "${code}"`);
+      return;
+    }
+    if (match.stock <= 0) {
+      flashScan('error', `${match.name} is out of stock`);
+      return;
+    }
+    addToCart(match);
+    flashScan('success', `Added ${match.name}`);
   };
 
   const changeQty = (id, delta) => {
@@ -530,13 +570,30 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
               <Search size={16} style={{ position: 'absolute', left: 12, top: 11, color: 'var(--muted)' }} />
               <input
                 value={query} onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by name or SKU"
+                onKeyDown={(e) => {
+                  if (e.key !== 'Enter') return;
+                  const code = query.trim();
+                  if (!code) return;
+                  const exact = findProductByCode(inventory, code);
+                  if (exact) {
+                    e.preventDefault();
+                    handleScanCode(code);
+                    setQuery('');
+                  }
+                }}
+                placeholder="Search, or scan with a barcode gun"
                 style={{ width: '100%', padding: '10px 12px 10px 34px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}
               />
             </div>
             <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
+            <button onClick={() => setScannerOpen(true)} title="Scan with camera" style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
+              border: '1px solid var(--border)', background: '#fff', color: 'var(--pine)', fontSize: 13, fontWeight: 600
+            }}>
+              <ScanLine size={15} /> Scan
+            </button>
             {user.canManageInventory && (
               <button onClick={() => setInventoryOpen(true)} style={{
                 display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
@@ -670,6 +727,20 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       )}
       {receipt && <ReceiptModal sale={receipt} settings={settings} onClose={() => { setReceipt(null); setCartOpen(false); }} />}
       {summaryOpen && <CashierSummaryModal sales={sales} settings={settings} user={user} onClose={() => setSummaryOpen(false)} voidSale={voidSale} />}
+      {scannerOpen && (
+        <BarcodeScannerModal continuous
+          subtitle="Point the camera at a product barcode. Keep scanning to add more items to the cart."
+          onDetect={handleScanCode} onClose={() => setScannerOpen(false)} />
+      )}
+      {scanFlash && (
+        <div style={{
+          position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 200,
+          background: scanFlash.type === 'success' ? 'var(--pine)' : 'var(--red)', color: '#fff',
+          padding: '10px 18px', borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: '0 4px 14px rgba(0,0,0,.18)'
+        }}>
+          {scanFlash.text}
+        </div>
+      )}
       {drugInfoProduct && <DrugInfoModal product={drugInfoProduct} onClose={() => setDrugInfoProduct(null)} />}
       {inventoryOpen && (
         <div style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 95, overflow: 'auto', padding: 20 }} className="pos-scroll">
@@ -892,6 +963,113 @@ function DrugInfoModal({ product, onClose }) {
               This is AI-generated reference information, not a clinical decision. Always verify against the product's official package insert, a current formulary, or the pharmacist-in-charge before advising a customer or dispensing.
             </div>
           </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Camera-based barcode scanner. Loads the decoding library on demand (no
+// point shipping it to every visit) and falls back to a plain text field
+// if the camera can't start — no camera, permission denied, or the library
+// fails to load shouldn't be a dead end.
+//
+// Pass `continuous` to keep the modal open and scanning after each hit
+// (checkout: scan several items in a row); omit it for a single-shot
+// capture that closes itself (e.g. filling in a product's barcode field).
+function BarcodeScannerModal({ onDetect, onClose, continuous, subtitle }) {
+  const videoRef = useRef(null);
+  const controlsRef = useRef(null);
+  const lastSeenRef = useRef({ code: '', at: 0 });
+  const [status, setStatus] = useState('starting'); // starting | scanning | error
+  const [errorMsg, setErrorMsg] = useState('');
+  const [manualCode, setManualCode] = useState('');
+  const [lastDetected, setLastDetected] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const { BrowserMultiFormatReader } = await import('https://esm.sh/@zxing/browser@0.1.5');
+        if (cancelled) return;
+        const reader = new BrowserMultiFormatReader();
+        const controls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
+          if (!result) return;
+          const code = result.getText();
+          const now = Date.now();
+          // Ignore the same code re-firing while it's still in frame.
+          if (lastSeenRef.current.code === code && now - lastSeenRef.current.at < 2000) return;
+          lastSeenRef.current = { code, at: now };
+          setLastDetected(code);
+          onDetect(code);
+        });
+        if (cancelled) { try { controls.stop(); } catch (e) {} return; }
+        controlsRef.current = controls;
+        setStatus('scanning');
+      } catch (err) {
+        if (cancelled) return;
+        setStatus('error');
+        setErrorMsg(err && err.name === 'NotAllowedError' ? 'Camera access was denied.' : "Couldn't start the camera scanner on this device.");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (controlsRef.current) {
+        try { controlsRef.current.stop(); } catch (e) {}
+      }
+    };
+  }, []);
+
+  const submitManual = () => {
+    const code = manualCode.trim();
+    if (!code) return;
+    setLastDetected(code);
+    onDetect(code);
+    setManualCode('');
+  };
+
+  return (
+    <div className="pos-modal-backdrop">
+      <div style={{ width: 380, maxWidth: '100%', background: '#fff', borderRadius: 14, padding: 22 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+          <span className="pos-serif" style={{ fontSize: 16, fontWeight: 700 }}>Scan barcode</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
+        </div>
+        {subtitle && <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: -4, marginBottom: 12 }}>{subtitle}</p>}
+
+        {status !== 'error' && (
+          <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#000', marginBottom: 12 }}>
+            <video ref={videoRef} style={{ width: '100%', display: 'block', maxHeight: 240, objectFit: 'cover' }} muted playsInline />
+            {status === 'starting' && (
+              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12 }}>
+                Starting camera…
+              </div>
+            )}
+          </div>
+        )}
+
+        {status === 'error' && (
+          <div style={{ background: 'var(--amber-pale)', color: '#5C3A12', borderRadius: 8, padding: 10, fontSize: 12, marginBottom: 12 }}>
+            {errorMsg} You can still type the code below — or use a USB/Bluetooth scanner gun, which works straight into the search box.
+          </div>
+        )}
+
+        {lastDetected && (
+          <div style={{ fontSize: 12, color: 'var(--pine)', marginBottom: 10 }}>Last scanned: <span className="pos-mono">{lastDetected}</span></div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <input value={manualCode} onChange={(e) => setManualCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitManual()}
+            placeholder="Or type the code" style={{ flex: 1, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+          <button onClick={submitManual} style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--pine)', color: '#fff', fontSize: 13, fontWeight: 600 }}>Use</button>
+        </div>
+
+        {continuous && (
+          <button onClick={onClose} style={{ width: '100%', marginTop: 14, padding: '10px 0', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 13, fontWeight: 600 }}>
+            Done scanning
+          </button>
         )}
       </div>
     </div>
@@ -1312,7 +1490,7 @@ function DashboardTab({ inventory, sales, settings }) {
   );
 }
 
-const emptyProduct = { name: '', category: '', sku: '', price: '', stock: '', reorderLevel: '', expiry: '', requiresRx: false };
+const emptyProduct = { name: '', category: '', sku: '', barcode: '', price: '', stock: '', reorderLevel: '', expiry: '', requiresRx: false };
 
 // Builds a short, human-readable summary of what changed between two
 // versions of a product — e.g. "Stock 40 → 60, Price KSh180 → KSh190".
@@ -1327,6 +1505,7 @@ function summarizeProductChange(before, after, settings) {
   if (before.expiry !== after.expiry) parts.push(`Expiry ${before.expiry || '—'} → ${after.expiry || '—'}`);
   if (before.category !== after.category) parts.push(`Category ${before.category} → ${after.category}`);
   if (before.sku !== after.sku) parts.push(`SKU ${before.sku} → ${after.sku}`);
+  if ((before.barcode || '') !== (after.barcode || '')) parts.push(`Barcode ${before.barcode || '—'} → ${after.barcode || '—'}`);
   if (!!before.requiresRx !== !!after.requiresRx) parts.push(after.requiresRx ? 'Marked as Rx' : 'Unmarked as Rx');
   return parts.length ? parts.join(', ') : 'No field changes';
 }
@@ -1336,7 +1515,7 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [query, setQuery] = useState('');
 
-  const filtered = inventory.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || p.sku.toLowerCase().includes(query.toLowerCase()));
+  const filtered = inventory.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || p.sku.toLowerCase().includes(query.toLowerCase()) || (p.barcode || '').toLowerCase().includes(query.toLowerCase()));
 
   const upsert = (product) => {
     if (product.id) {
@@ -1386,7 +1565,7 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
           <Plus size={14} /> Add product
         </button>
       </div>
-      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search inventory"
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search inventory by name, SKU, or barcode"
         style={{ width: '100%', maxWidth: 320, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginBottom: 14 }} />
 
       <div className="pos-table-scroll" style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12 }}>
@@ -1424,6 +1603,7 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
 
 function ProductModal({ product, onClose, onSave }) {
   const [form, setForm] = useState({ ...product });
+  const [scannerOpen, setScannerOpen] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const valid = form.name && form.category && form.sku && form.price !== '' && form.stock !== '';
 
@@ -1444,6 +1624,18 @@ function ProductModal({ product, onClose, onSave }) {
               style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginTop: 3 }} />
           </div>
         ))}
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: 'var(--muted)' }}>Barcode (printed on packaging, optional)</label>
+          <div style={{ display: 'flex', gap: 8, marginTop: 3 }}>
+            <input value={form.barcode || ''} onChange={(e) => set('barcode', e.target.value)}
+              style={{ flex: 1, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+            <button type="button" onClick={() => setScannerOpen(true)} title="Scan with camera" style={{
+              display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: '#fff', color: 'var(--pine)'
+            }}>
+              <ScanLine size={15} />
+            </button>
+          </div>
+        </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 16 }}>
           <input type="checkbox" checked={form.requiresRx} onChange={(e) => set('requiresRx', e.target.checked)} /> Requires a prescription
         </label>
@@ -1452,6 +1644,12 @@ function ProductModal({ product, onClose, onSave }) {
           Save product
         </button>
       </div>
+      {scannerOpen && (
+        <BarcodeScannerModal
+          subtitle="Scan the barcode printed on the product packaging."
+          onDetect={(code) => { set('barcode', code); setScannerOpen(false); }}
+          onClose={() => setScannerOpen(false)} />
+      )}
     </div>
   );
 }
