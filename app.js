@@ -63,7 +63,28 @@ const DEFAULT_STAFF = [
   { id: 's3', name: 'Kevin Otieno', role: 'staff', canManageInventory: false },
 ];
 
-const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxRate: 16 };
+const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxRate: 16, sessionTimeoutMinutes: 5 };
+
+const EXPIRY_WINDOW_DAYS = 30;
+
+// Whole days between today and a product's expiry date. Negative means
+// already expired. Returns null when there's no expiry date on file.
+function daysUntilExpiry(dateStr) {
+  if (!dateStr) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  d.setHours(0, 0, 0, 0);
+  return Math.round((d - today) / 86400000);
+}
+
+function expiryLabel(days) {
+  if (days === null) return '';
+  if (days < 0) return `Expired ${Math.abs(days)}d ago`;
+  if (days === 0) return 'Expires today';
+  return `Expires in ${days}d`;
+}
 
 /* ---------------------------------------------------------------------- */
 /* Storage helpers — backed by Supabase, shared across every device       */
@@ -171,6 +192,38 @@ function isSameDay(iso, ref) {
   return d.toDateString() === ref.toDateString();
 }
 
+function csvCell(value) {
+  return `"${String(value ?? '').replace(/"/g, '""')}"`;
+}
+
+// Downloads the given sales as a CSV file — used for accounting / KRA
+// records, since sales otherwise only ever live inside the app.
+function exportSalesCsv(salesList, settings) {
+  const header = ['Date/Time', 'Sale ID', 'Cashier', 'Payment Method', 'Customer', 'Items', 'Subtotal', 'Tax', 'Total', 'Status'];
+  const rows = salesList.map((s) => [
+    new Date(s.timestamp).toLocaleString(),
+    s.id,
+    s.cashier,
+    s.paymentMethod + (s.paymentMethod === 'account' ? (s.settled ? ' (settled)' : ' (unpaid)') : ''),
+    s.customerName || '',
+    s.items.map((i) => `${i.qty} x ${i.name}`).join('; '),
+    Number(s.subtotal).toFixed(2),
+    Number(s.tax).toFixed(2),
+    Number(s.total).toFixed(2),
+    s.voided ? `Voided${s.voidReason ? ': ' + s.voidReason : ''}` : 'Completed',
+  ]);
+  const csv = [header, ...rows].map((r) => r.map(csvCell).join(',')).join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `sales-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
 /* ---------------------------------------------------------------------- */
 /* Global styles                                                          */
 /* ---------------------------------------------------------------------- */
@@ -261,7 +314,7 @@ const STYLES = `
 /* Login                                                                   */
 /* ---------------------------------------------------------------------- */
 
-function LoginScreen({ settings, onLogin }) {
+function LoginScreen({ settings, onLogin, notice }) {
   const [tab, setTab] = useState('staff');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
@@ -303,6 +356,12 @@ function LoginScreen({ settings, onLogin }) {
         </div>
         <h1 className="pos-serif" style={{ fontSize: 22, fontWeight: 700, margin: '0 0 2px' }}>{settings.pharmacyName}</h1>
         <p style={{ fontSize: 13, color: 'var(--muted)', margin: '0 0 20px' }}>Point of sale</p>
+
+        {notice && (
+          <div style={{ background: 'var(--amber-pale)', color: '#5C3A12', borderRadius: 8, padding: '8px 10px', fontSize: 12, marginBottom: 16, textAlign: 'left' }}>
+            {notice}
+          </div>
+        )}
 
         <div style={{ display: 'flex', background: 'var(--pine-pale)', borderRadius: 10, padding: 4, marginBottom: 20 }}>
           {['staff', 'admin'].map((t) => (
@@ -383,7 +442,7 @@ function TopBar({ settings, user, onLogout, lastSynced, right }) {
 /* Staff / Cashier POS                                                     */
 /* ---------------------------------------------------------------------- */
 
-function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, lastSynced, onLogout, saveInventory, logInventoryChange }) {
+function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, lastSynced, onLogout, saveInventory, logInventoryChange, voidSale }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [cart, setCart] = useState([]);
@@ -394,7 +453,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [inventoryOpen, setInventoryOpen] = useState(false);
 
-  const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()));
+  const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()) && !s.voided);
   const myTodayRevenue = myTodaySales.reduce((sum, s) => sum + s.total, 0);
 
   const categories = ['All', ...Array.from(new Set(inventory.map((p) => p.category)))];
@@ -444,6 +503,10 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       amountTendered: payment.tendered ?? total,
       change: payment.change ?? 0,
       mpesaReceipt: payment.mpesaReceipt || null,
+      customerName: payment.customerName || null,
+      customerPhone: payment.customerPhone || null,
+      settled: payment.method !== 'account',
+      voided: false,
     };
     addSale(sale);
     updateStock(cart.map((i) => ({ id: i.id, qty: i.qty })));
@@ -497,6 +560,8 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
             {filtered.map((p) => {
               const low = p.stock <= p.reorderLevel;
               const out = p.stock <= 0;
+              const expDays = daysUntilExpiry(p.expiry);
+              const expiringSoon = expDays !== null && expDays <= EXPIRY_WINDOW_DAYS;
               return (
                 <div key={p.id} onClick={() => !out && addToCart(p)} role="button" tabIndex={0} style={{
                   textAlign: 'left', background: 'var(--paper)', border: '1px dashed var(--border)',
@@ -524,6 +589,11 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                       color: out ? 'var(--red)' : low ? 'var(--amber)' : 'var(--pine)'
                     }}>{out ? 'Out of stock' : low ? `${p.stock} left` : `${p.stock} in stock`}</span>
                   </div>
+                  {expiringSoon && (
+                    <div style={{ marginTop: 6, fontSize: 10.5, fontWeight: 600, color: expDays < 0 ? 'var(--red)' : 'var(--amber)' }}>
+                      {expiryLabel(expDays)}
+                    </div>
+                  )}
                 </div>
 
               );
@@ -599,7 +669,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
           onClose={() => setCheckoutOpen(false)} onComplete={completeSale} />
       )}
       {receipt && <ReceiptModal sale={receipt} settings={settings} onClose={() => { setReceipt(null); setCartOpen(false); }} />}
-      {summaryOpen && <CashierSummaryModal sales={sales} settings={settings} user={user} onClose={() => setSummaryOpen(false)} />}
+      {summaryOpen && <CashierSummaryModal sales={sales} settings={settings} user={user} onClose={() => setSummaryOpen(false)} voidSale={voidSale} />}
       {drugInfoProduct && <DrugInfoModal product={drugInfoProduct} onClose={() => setDrugInfoProduct(null)} />}
       {inventoryOpen && (
         <div style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 95, overflow: 'auto', padding: 20 }} className="pos-scroll">
@@ -617,6 +687,7 @@ const PAYMENT_METHOD_META = {
   cash: { label: 'Cash', Icon: Banknote },
   card: { label: 'Card', Icon: CreditCard },
   mpesa: { label: 'M-Pesa', Icon: Smartphone },
+  account: { label: 'On account', Icon: Users },
 };
 
 // Simple, dependency-free bar breakdown — reused by the cashier's daily
@@ -652,12 +723,26 @@ function PaymentMethodBars({ sales, settings }) {
   );
 }
 
-function CashierSummaryModal({ sales, settings, user, onClose }) {
+function CashierSummaryModal({ sales, settings, user, onClose, voidSale }) {
   const today = new Date();
-  const mySales = sales
+  const [voidingId, setVoidingId] = useState(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  const allMySales = sales
     .filter((s) => s.cashier === user.name && isSameDay(s.timestamp, today))
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  const revenue = mySales.reduce((sum, s) => sum + s.total, 0);
+  const activeMySales = allMySales.filter((s) => !s.voided);
+  const revenue = activeMySales.reduce((sum, s) => sum + s.total, 0);
+
+  const confirmVoid = async (id) => {
+    if (!voidSale) return;
+    setBusy(true);
+    await voidSale(id, voidReason.trim());
+    setBusy(false);
+    setVoidingId(null);
+    setVoidReason('');
+  };
 
   return (
     <div className="pos-modal-backdrop">
@@ -670,7 +755,7 @@ function CashierSummaryModal({ sales, settings, user, onClose }) {
         <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
           <div style={{ flex: 1, background: 'var(--pine-pale)', borderRadius: 10, padding: '12px 14px' }}>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Sales rung up</div>
-            <div className="pos-serif" style={{ fontSize: 20, fontWeight: 700 }}>{mySales.length}</div>
+            <div className="pos-serif" style={{ fontSize: 20, fontWeight: 700 }}>{activeMySales.length}</div>
           </div>
           <div style={{ flex: 1, background: 'var(--pine-pale)', borderRadius: 10, padding: '12px 14px' }}>
             <div style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 4 }}>Total revenue</div>
@@ -679,15 +764,41 @@ function CashierSummaryModal({ sales, settings, user, onClose }) {
         </div>
 
         <h3 style={{ fontSize: 13, fontWeight: 600, marginBottom: 10 }}>By payment method</h3>
-        <PaymentMethodBars sales={mySales} settings={settings} />
+        <PaymentMethodBars sales={activeMySales} settings={settings} />
 
-        {mySales.length > 0 && (
+        {allMySales.length > 0 && (
           <>
-            <h3 style={{ fontSize: 13, fontWeight: 600, margin: '18px 0 10px' }}>Recent sales</h3>
-            {mySales.slice(0, 6).map((s) => (
-              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                <span>{new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {s.items.length} item{s.items.length !== 1 ? 's' : ''}</span>
-                <span className="pos-mono">{formatMoney(s.total, settings.currency)}</span>
+            <h3 style={{ fontSize: 13, fontWeight: 600, margin: '18px 0 10px' }}>Today's sales</h3>
+            {allMySales.map((s) => (
+              <div key={s.id} style={{ padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13 }}>
+                  <span style={{ textDecoration: s.voided ? 'line-through' : 'none', color: s.voided ? 'var(--muted)' : 'var(--ink)' }}>
+                    {new Date(s.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {s.items.length} item{s.items.length !== 1 ? 's' : ''}
+                  </span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="pos-mono" style={{ textDecoration: s.voided ? 'line-through' : 'none', color: s.voided ? 'var(--muted)' : 'var(--ink)' }}>{formatMoney(s.total, settings.currency)}</span>
+                    {s.voided ? (
+                      <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--red)', background: 'var(--red-pale)', padding: '2px 6px', borderRadius: 5 }}>Voided</span>
+                    ) : voidSale && (
+                      <button onClick={() => { setVoidingId(voidingId === s.id ? null : s.id); setVoidReason(''); }} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 11, textDecoration: 'underline' }}>
+                        Void
+                      </button>
+                    )}
+                  </span>
+                </div>
+                {voidingId === s.id && (
+                  <div style={{ marginTop: 8, padding: 10, background: 'var(--red-pale)', borderRadius: 8 }}>
+                    <label style={{ fontSize: 11, color: '#7A2530' }}>Reason for reversing this sale</label>
+                    <input value={voidReason} onChange={(e) => setVoidReason(e.target.value)} placeholder="e.g. wrong item rung up"
+                      style={{ width: '100%', padding: '7px 9px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 12, marginTop: 4, marginBottom: 8 }} />
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button disabled={busy} onClick={() => confirmVoid(s.id)} style={{ flex: 1, padding: '7px 0', borderRadius: 7, border: 'none', background: 'var(--red)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>
+                        {busy ? 'Voiding…' : 'Confirm void'}
+                      </button>
+                      <button onClick={() => setVoidingId(null)} style={{ flex: 1, padding: '7px 0', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', fontSize: 12 }}>Cancel</button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </>
@@ -795,11 +906,13 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
   const [mpesaStatus, setMpesaStatus] = useState('idle'); // idle | sending | waiting | success | failed | timeout
   const [mpesaError, setMpesaError] = useState('');
   const [mpesaReceipt, setMpesaReceipt] = useState(null);
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
   const pollTimer = useRef(null);
   const needsRx = cart.some((i) => i.requiresRx);
   const tenderedNum = parseFloat(tendered) || 0;
   const change = method === 'cash' ? Math.max(0, tenderedNum - total) : 0;
-  const canComplete = (!needsRx || rxConfirmed) && (method !== 'cash' || tenderedNum >= total);
+  const canComplete = (!needsRx || rxConfirmed) && (method !== 'cash' || tenderedNum >= total) && (method !== 'account' || customerName.trim().length > 0);
 
   useEffect(() => () => { if (pollTimer.current) clearInterval(pollTimer.current); }, []);
 
@@ -873,14 +986,15 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
           <span className="pos-mono">{formatMoney(total, settings.currency)}</span>
         </div>
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
           {[
             { key: 'cash', label: 'Cash', Icon: Banknote },
             { key: 'card', label: 'Card', Icon: CreditCard },
             { key: 'mpesa', label: 'M-Pesa', Icon: Smartphone },
+            { key: 'account', label: 'On account', Icon: Users },
           ].map(({ key, label, Icon }) => (
             <button key={key} onClick={() => setMethod(key)} style={{
-              flex: 1, padding: '10px 0', borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
+              flex: '1 1 70px', padding: '10px 0', borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
               border: method === key ? '1px solid var(--pine)' : '1px solid var(--border)',
               background: method === key ? 'var(--pine-pale)' : '#fff', color: method === key ? 'var(--pine)' : 'var(--ink)', fontSize: 12, fontWeight: 500
             }}><Icon size={16} />{label}</button>
@@ -898,6 +1012,18 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
                 <span className="pos-mono">{tenderedNum < total ? '' : formatMoney(change, settings.currency)}</span>
               </div>
             )}
+          </div>
+        )}
+
+        {method === 'account' && (
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Customer name</label>
+            <input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="e.g. Wanjiku Kamau"
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 15, marginTop: 4, marginBottom: 10 }} />
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>Phone (optional)</label>
+            <input value={customerPhone} onChange={(e) => setCustomerPhone(e.target.value)} placeholder="07XX XXX XXX" inputMode="tel"
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 15, marginTop: 4 }} />
+            <p style={{ fontSize: 11.5, color: 'var(--muted)', marginTop: 8 }}>This sale will be recorded as unpaid on the customer's account until it's settled from the Accounts tab.</p>
           </div>
         )}
 
@@ -951,7 +1077,11 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
         )}
 
         {method !== 'mpesa' && (
-          <button onClick={() => onComplete({ method, tendered: method === 'cash' ? tenderedNum : total, change })} disabled={!canComplete} style={{
+          <button onClick={() => onComplete({
+            method, tendered: method === 'cash' ? tenderedNum : total, change,
+            customerName: method === 'account' ? customerName.trim() : undefined,
+            customerPhone: method === 'account' ? customerPhone.trim() : undefined,
+          })} disabled={!canComplete} style={{
             width: '100%', padding: '12px 0', borderRadius: 10, border: 'none', fontWeight: 600, fontSize: 15,
             background: canComplete ? 'var(--pine)' : '#B9C4B4', color: '#fff'
           }}>Confirm payment</button>
@@ -989,6 +1119,12 @@ function ReceiptModal({ sale, settings, onClose }) {
         {sale.paymentMethod === 'mpesa' && sale.mpesaReceipt && (
           <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)' }}><span>M-Pesa receipt</span><span>{sale.mpesaReceipt}</span></div>
         )}
+        {sale.paymentMethod === 'account' && (
+          <>
+            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--muted)' }}><span>Customer</span><span>{sale.customerName}{sale.customerPhone ? ` (${sale.customerPhone})` : ''}</span></div>
+            <div style={{ textAlign: 'center', fontWeight: 700, color: 'var(--amber)', marginTop: 8 }}>UNPAID — on account</div>
+          </>
+        )}
         <div style={{ textAlign: 'center', color: 'var(--muted)', marginTop: 12 }}>Thank you — get well soon</div>
         <button onClick={onClose} style={{ width: '100%', marginTop: 16, padding: '10px 0', borderRadius: 8, border: 'none', background: 'var(--pine)', color: '#fff', fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>New sale</button>
       </div>
@@ -1001,13 +1137,14 @@ function ReceiptModal({ sale, settings, onClose }) {
 /* ---------------------------------------------------------------------- */
 
 function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, lastSynced,
-  saveInventory, saveStaff, saveSettings, inventoryLog, logInventoryChange }) {
+  saveInventory, saveStaff, saveSettings, inventoryLog, logInventoryChange, voidSale, settleAccountSale }) {
   const [tab, setTab] = useState('dashboard');
   const navItems = [
     { key: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
     { key: 'inventory', label: 'Inventory', Icon: Package },
     { key: 'activity', label: 'Activity', Icon: Receipt },
     { key: 'sales', label: 'Sales history', Icon: ClipboardList },
+    { key: 'accounts', label: 'Accounts', Icon: CreditCard },
     { key: 'staff', label: 'Staff', Icon: Users },
     { key: 'settings', label: 'Settings', Icon: SettingsIcon },
   ];
@@ -1030,7 +1167,8 @@ function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, l
           {tab === 'dashboard' && <DashboardTab inventory={inventory} sales={sales} settings={settings} />}
           {tab === 'inventory' && <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} user={user} logInventoryChange={logInventoryChange} />}
           {tab === 'activity' && <ActivityTab inventoryLog={inventoryLog} />}
-          {tab === 'sales' && <SalesTab sales={sales} settings={settings} />}
+          {tab === 'sales' && <SalesTab sales={sales} settings={settings} voidSale={voidSale} />}
+          {tab === 'accounts' && <AccountsTab sales={sales} settings={settings} settleAccountSale={settleAccountSale} />}
           {tab === 'staff' && <StaffTab staffList={staffList} saveStaff={saveStaff} />}
           {tab === 'settings' && <SettingsTab settings={settings} saveSettings={saveSettings} />}
         </div>
@@ -1056,7 +1194,7 @@ function RevenueTrend({ sales, settings }) {
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const daySales = sales.filter((s) => isSameDay(s.timestamp, d));
+      const daySales = sales.filter((s) => isSameDay(s.timestamp, d) && !s.voided);
       arr.push({
         label: d.toLocaleDateString(undefined, { weekday: 'short' }),
         dateLabel: d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }),
@@ -1102,9 +1240,12 @@ function RevenueTrend({ sales, settings }) {
 
 function DashboardTab({ inventory, sales, settings }) {
   const today = new Date();
-  const todaySales = sales.filter((s) => isSameDay(s.timestamp, today));
+  const todaySales = sales.filter((s) => isSameDay(s.timestamp, today) && !s.voided);
   const revenue = todaySales.reduce((sum, s) => sum + s.total, 0);
   const lowStock = inventory.filter((p) => p.stock <= p.reorderLevel);
+  const expiringSoon = inventory
+    .filter((p) => p.stock > 0 && daysUntilExpiry(p.expiry) !== null && daysUntilExpiry(p.expiry) <= EXPIRY_WINDOW_DAYS)
+    .sort((a, b) => daysUntilExpiry(a.expiry) - daysUntilExpiry(b.expiry));
   const recent = [...sales].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 6);
 
   return (
@@ -1115,6 +1256,7 @@ function DashboardTab({ inventory, sales, settings }) {
         <StatCard label="Transactions today" value={todaySales.length} />
         <StatCard label="Products tracked" value={inventory.length} />
         <StatCard label="Low stock alerts" value={lowStock.length} accent={lowStock.length ? 'var(--red)' : undefined} />
+        <StatCard label="Expiring within 30d" value={expiringSoon.length} accent={expiringSoon.length ? 'var(--red)' : undefined} />
       </div>
 
       <div className="pos-dash-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
@@ -1125,7 +1267,7 @@ function DashboardTab({ inventory, sales, settings }) {
         </div>
       </div>
 
-      <div className="pos-dash-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+      <div className="pos-dash-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20 }}>
         <div>
           <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <AlertTriangle size={15} color="var(--amber)" /> Needs reordering
@@ -1140,13 +1282,28 @@ function DashboardTab({ inventory, sales, settings }) {
         </div>
         <div>
           <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <AlertTriangle size={15} color="var(--red)" /> Expiring within 30 days
+          </h3>
+          {expiringSoon.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>Nothing in stock is close to expiry.</p>}
+          {expiringSoon.map((p) => {
+            const days = daysUntilExpiry(p.expiry);
+            return (
+              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <span>{p.name} <span style={{ color: 'var(--muted)', fontSize: 11 }}>({p.stock} in stock)</span></span>
+                <span className="pos-mono" style={{ color: days < 0 ? 'var(--red)' : 'var(--amber)' }}>{expiryLabel(days)}</span>
+              </div>
+            );
+          })}
+        </div>
+        <div>
+          <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Receipt size={15} /> Recent transactions
           </h3>
           {recent.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No sales recorded yet.</p>}
           {recent.map((s) => (
             <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-              <span>{s.cashier} · {new Date(s.timestamp).toLocaleTimeString()}</span>
-              <span className="pos-mono">{formatMoney(s.total, settings.currency)}</span>
+              <span style={{ textDecoration: s.voided ? 'line-through' : 'none', color: s.voided ? 'var(--muted)' : 'var(--ink)' }}>{s.cashier} · {new Date(s.timestamp).toLocaleTimeString()}</span>
+              <span className="pos-mono" style={{ color: s.voided ? 'var(--muted)' : 'var(--ink)' }}>{s.voided ? 'Voided' : formatMoney(s.total, settings.currency)}</span>
             </div>
           ))}
         </div>
@@ -1237,21 +1394,25 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
           <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 84px', padding: '10px 16px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
             <span>Product</span><span>Category</span><span>SKU</span><span>Price</span><span>Stock</span><span>Expiry</span><span></span>
           </div>
-          {filtered.map((p) => (
+          {filtered.map((p) => {
+            const expDays = daysUntilExpiry(p.expiry);
+            const expiringSoon = expDays !== null && expDays <= EXPIRY_WINDOW_DAYS;
+            return (
             <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 84px', padding: '10px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
               <span>{p.name}{p.requiresRx ? ' ℞' : ''}</span>
               <span style={{ color: 'var(--muted)' }}>{p.category}</span>
               <span className="pos-mono" style={{ fontSize: 12 }}>{p.sku}</span>
               <span className="pos-mono">{formatMoney(p.price, settings.currency)}</span>
               <span style={{ color: p.stock <= p.reorderLevel ? 'var(--red)' : 'var(--ink)' }}>{p.stock}</span>
-              <span style={{ color: 'var(--muted)', fontSize: 12 }}>{p.expiry}</span>
+              <span style={{ color: expiringSoon ? (expDays < 0 ? 'var(--red)' : 'var(--amber)') : 'var(--muted)', fontSize: 12, fontWeight: expiringSoon ? 600 : 400 }} title={expiringSoon ? expiryLabel(expDays) : ''}>{p.expiry}</span>
               <span style={{ display: 'flex', gap: 6 }}>
                 <button onClick={() => setDrugInfoProduct(p)} title="AI dosage / side effects / interactions lookup" style={{ background: 'none', border: 'none', color: 'var(--pine)' }}><Info size={14} /></button>
                 <button onClick={() => setModalProduct(p)} style={{ background: 'none', border: 'none', color: 'var(--muted)' }}><Edit2 size={14} /></button>
                 <button onClick={() => remove(p.id)} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>
               </span>
             </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -1354,10 +1515,13 @@ function ActivityTab({ inventoryLog }) {
   );
 }
 
-function SalesTab({ sales, settings }) {
+function SalesTab({ sales, settings, voidSale }) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [expanded, setExpanded] = useState(null);
+  const [voidingId, setVoidingId] = useState(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [busy, setBusy] = useState(false);
 
   const filtered = sales.filter((s) => {
     const d = new Date(s.timestamp);
@@ -1366,11 +1530,28 @@ function SalesTab({ sales, settings }) {
     return true;
   }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-  const total = filtered.reduce((sum, s) => sum + s.total, 0);
+  const total = filtered.filter((s) => !s.voided).reduce((sum, s) => sum + s.total, 0);
+
+  const confirmVoid = async (id) => {
+    if (!voidSale) return;
+    setBusy(true);
+    await voidSale(id, voidReason.trim());
+    setBusy(false);
+    setVoidingId(null);
+    setVoidReason('');
+  };
 
   return (
     <div>
-      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Sales history</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+        <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700 }}>Sales history</h2>
+        <button onClick={() => exportSalesCsv(filtered, settings)} disabled={filtered.length === 0} style={{
+          display: 'flex', alignItems: 'center', gap: 6, padding: '9px 14px', borderRadius: 8, border: '1px solid var(--border)',
+          background: '#fff', fontSize: 13, fontWeight: 600, color: filtered.length === 0 ? 'var(--muted)' : 'var(--pine)'
+        }}>
+          <ClipboardList size={14} /> Export CSV
+        </button>
+      </div>
       <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
         <span style={{ color: 'var(--muted)', fontSize: 13 }}>to</span>
@@ -1385,9 +1566,13 @@ function SalesTab({ sales, settings }) {
             <div onClick={() => setExpanded(expanded === s.id ? null : s.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer', fontSize: 13 }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <ChevronRight size={13} style={{ transform: expanded === s.id ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
-                {new Date(s.timestamp).toLocaleString()} · {s.cashier}
+                <span style={{ textDecoration: s.voided ? 'line-through' : 'none', color: s.voided ? 'var(--muted)' : 'var(--ink)' }}>
+                  {new Date(s.timestamp).toLocaleString()} · {s.cashier}
+                </span>
+                {s.voided && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--red)', background: 'var(--red-pale)', padding: '2px 6px', borderRadius: 5 }}>Voided</span>}
+                {s.paymentMethod === 'account' && !s.settled && !s.voided && <span style={{ fontSize: 10, fontWeight: 700, color: 'var(--amber)', background: 'var(--amber-pale)', padding: '2px 6px', borderRadius: 5 }}>Unpaid</span>}
               </span>
-              <span className="pos-mono">{formatMoney(s.total, settings.currency)}</span>
+              <span className="pos-mono" style={{ color: s.voided ? 'var(--muted)' : 'var(--ink)', textDecoration: s.voided ? 'line-through' : 'none' }}>{formatMoney(s.total, settings.currency)}</span>
             </div>
             {expanded === s.id && (
               <div style={{ padding: '4px 16px 14px 37px', fontSize: 12.5, color: 'var(--muted)' }}>
@@ -1396,12 +1581,119 @@ function SalesTab({ sales, settings }) {
                     <span>{i.qty} x {i.name}</span><span className="pos-mono">{formatMoney(i.price * i.qty, settings.currency)}</span>
                   </div>
                 ))}
-                <div style={{ marginTop: 4 }}>Paid via {s.paymentMethod}</div>
+                <div style={{ marginTop: 4 }}>Paid via {s.paymentMethod}{s.customerName ? ` — ${s.customerName}` : ''}</div>
+                {s.voided && <div style={{ marginTop: 4, color: 'var(--red)' }}>Voided by {s.voidedBy} on {new Date(s.voidedAt).toLocaleString()}{s.voidReason ? `: ${s.voidReason}` : ''}</div>}
+
+                {!s.voided && voidSale && (
+                  voidingId === s.id ? (
+                    <div style={{ marginTop: 10, padding: 10, background: 'var(--red-pale)', borderRadius: 8 }}>
+                      <label style={{ fontSize: 11, color: '#7A2530' }}>Reason for reversing this sale</label>
+                      <input value={voidReason} onChange={(e) => setVoidReason(e.target.value)} placeholder="e.g. customer changed their mind"
+                        style={{ width: '100%', padding: '7px 9px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 12, marginTop: 4, marginBottom: 8 }} />
+                      <div style={{ display: 'flex', gap: 8 }}>
+                        <button disabled={busy} onClick={() => confirmVoid(s.id)} style={{ flex: 1, padding: '7px 0', borderRadius: 7, border: 'none', background: 'var(--red)', color: '#fff', fontSize: 12, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>
+                          {busy ? 'Voiding…' : 'Confirm void'}
+                        </button>
+                        <button onClick={() => setVoidingId(null)} style={{ flex: 1, padding: '7px 0', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', fontSize: 12 }}>Cancel</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button onClick={() => { setVoidingId(s.id); setVoidReason(''); }} style={{ marginTop: 8, background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 7, padding: '6px 12px', fontSize: 12 }}>
+                      Void this sale
+                    </button>
+                  )
+                )}
               </div>
             )}
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function AccountsTab({ sales, settings, settleAccountSale }) {
+  const [settleMethod, setSettleMethod] = useState({});
+  const [busyId, setBusyId] = useState(null);
+
+  const accountSales = sales.filter((s) => s.paymentMethod === 'account' && !s.voided);
+  const outstanding = accountSales.filter((s) => !s.settled).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+  const settledRecently = accountSales.filter((s) => s.settled).sort((a, b) => new Date(b.settledAt || b.timestamp) - new Date(a.settledAt || a.timestamp)).slice(0, 10);
+
+  const byCustomer = {};
+  outstanding.forEach((s) => {
+    const key = s.customerName || 'Unknown customer';
+    if (!byCustomer[key]) byCustomer[key] = { name: key, phone: s.customerPhone, sales: [], total: 0 };
+    byCustomer[key].sales.push(s);
+    byCustomer[key].total += s.total;
+  });
+  const customers = Object.values(byCustomer).sort((a, b) => b.total - a.total);
+  const totalOutstanding = outstanding.reduce((sum, s) => sum + s.total, 0);
+
+  const markPaid = async (id) => {
+    if (!settleAccountSale) return;
+    setBusyId(id);
+    await settleAccountSale(id, settleMethod[id] || 'cash');
+    setBusyId(null);
+  };
+
+  return (
+    <div>
+      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Customer accounts</h2>
+      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>Sales rung up "on account" — track who owes what, and mark them settled once collected.</p>
+
+      <div style={{ marginBottom: 20 }}>
+        <StatCard label="Total outstanding" value={formatMoney(totalOutstanding, settings.currency)} accent={totalOutstanding ? 'var(--red)' : undefined} />
+      </div>
+
+      {customers.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No outstanding balances right now.</p>}
+
+      {customers.map((c) => (
+        <div key={c.name} style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</div>
+              {c.phone && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.phone}</div>}
+            </div>
+            <div className="pos-mono" style={{ fontWeight: 700, fontSize: 15, color: 'var(--red)' }}>{formatMoney(c.total, settings.currency)}</div>
+          </div>
+          {c.sales.map((s) => (
+            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, padding: '8px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap', gap: 8 }}>
+              <span style={{ color: 'var(--muted)' }}>{new Date(s.timestamp).toLocaleDateString()} · {s.items.length} item{s.items.length !== 1 ? 's' : ''} · {s.cashier}</span>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span className="pos-mono">{formatMoney(s.total, settings.currency)}</span>
+                {settleAccountSale && (
+                  <>
+                    <select value={settleMethod[s.id] || 'cash'} onChange={(e) => setSettleMethod({ ...settleMethod, [s.id]: e.target.value })}
+                      style={{ padding: '4px 6px', borderRadius: 6, border: '1px solid var(--border)', fontSize: 11 }}>
+                      <option value="cash">Cash</option>
+                      <option value="card">Card</option>
+                      <option value="mpesa">M-Pesa</option>
+                    </select>
+                    <button disabled={busyId === s.id} onClick={() => markPaid(s.id)} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 11, fontWeight: 600, opacity: busyId === s.id ? 0.6 : 1 }}>
+                      {busyId === s.id ? 'Saving…' : 'Mark as paid'}
+                    </button>
+                  </>
+                )}
+              </span>
+            </div>
+          ))}
+        </div>
+      ))}
+
+      {settledRecently.length > 0 && (
+        <>
+          <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, margin: '20px 0 10px' }}>Recently settled</h3>
+          <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+            {settledRecently.map((s) => (
+              <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, padding: '10px 16px', borderBottom: '1px solid var(--border)', color: 'var(--muted)' }}>
+                <span>{s.customerName} · settled {s.settledAt ? new Date(s.settledAt).toLocaleDateString() : '—'}{s.settledMethod ? ` via ${s.settledMethod}` : ''}</span>
+                <span className="pos-mono">{formatMoney(s.total, settings.currency)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1547,6 +1839,11 @@ function SettingsTab({ settings, saveSettings }) {
           <label style={{ fontSize: 12, color: 'var(--muted)' }}>Tax rate (%)</label>
           <input type="number" value={form.taxRate} onChange={(e) => setForm({ ...form, taxRate: parseFloat(e.target.value) || 0 })} style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginTop: 3 }} />
         </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ fontSize: 12, color: 'var(--muted)' }}>Auto logout after inactivity (minutes)</label>
+          <input type="number" min="0" value={form.sessionTimeoutMinutes} onChange={(e) => setForm({ ...form, sessionTimeoutMinutes: parseInt(e.target.value) || 0 })} style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginTop: 3 }} />
+          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Cashiers and admins are logged out after this many minutes with no activity on a terminal. Set to 0 to disable.</p>
+        </div>
         <button disabled={!dirty} onClick={() => saveSettings(form)} style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: dirty ? 'var(--pine)' : '#B9C4B4', color: '#fff', fontWeight: 600 }}>Save changes</button>
       </div>
     </div>
@@ -1567,6 +1864,7 @@ function App() {
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const [lastSynced, setLastSynced] = useState('just now');
   const [pendingCount, setPendingCount] = useState(0);
+  const [loginNotice, setLoginNotice] = useState('');
   const pollRef = useRef(null);
   const sessionRestored = useRef(false);
 
@@ -1581,7 +1879,7 @@ function App() {
       getOrInit('settings', DEFAULT_SETTINGS),
       getOrInit('inventoryLog', []),
     ]);
-    setInventory(inv); setSales(sls); setStaffList(stf); setSettings(cfg); setInventoryLog(invLog);
+    setInventory(inv); setSales(sls); setStaffList(stf); setSettings({ ...DEFAULT_SETTINGS, ...cfg }); setInventoryLog(invLog);
     setLastSynced(new Date().toLocaleTimeString());
     refreshPending();
     setReady(true);
@@ -1631,12 +1929,44 @@ function App() {
 
   const handleLogin = (staffMember) => {
     setUser(staffMember);
+    setLoginNotice('');
     localStorage.setItem(SESSION_KEY, staffMember.id);
   };
   const handleLogout = () => {
     setUser(null);
     localStorage.removeItem(SESSION_KEY);
   };
+
+  // Auto-logout after inactivity — shared/left-open terminals shouldn't stay
+  // signed in indefinitely under whoever's PIN unlocked them. Any mouse,
+  // keyboard, or touch activity resets the timer; a fresh page load also
+  // resets it. Configurable per-pharmacy in Settings; 0 disables it.
+  useEffect(() => {
+    if (!user) return undefined;
+    const minutes = Number(settings.sessionTimeoutMinutes);
+    if (!minutes || minutes <= 0) return undefined;
+    const limitMs = minutes * 60 * 1000;
+    let timer = null;
+
+    const trigger = () => {
+      setLoginNotice("You were logged out after a period of inactivity.");
+      handleLogout();
+    };
+    const resetTimer = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(trigger, limitMs);
+    };
+
+    const events = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
+    events.forEach((evt) => window.addEventListener(evt, resetTimer));
+    resetTimer();
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      events.forEach((evt) => window.removeEventListener(evt, resetTimer));
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, settings.sessionTimeoutMinutes]);
 
   const saveInventory = async (next) => {
     setInventory(next);
@@ -1680,6 +2010,49 @@ function App() {
     await saveShared('inventory', next);
   };
 
+  // Reverses a completed sale: marks it voided (kept in the record for the
+  // audit trail, not deleted) and restocks whatever it sold. Available to
+  // both admins (any sale) and cashiers (their own same-day sales).
+  const voidSale = async (saleId, reason) => {
+    const sale = sales.find((s) => s.id === saleId);
+    if (!sale || sale.voided) return false;
+
+    const nextSales = sales.map((s) => (s.id === saleId ? {
+      ...s,
+      voided: true,
+      voidReason: reason || '',
+      voidedAt: new Date().toISOString(),
+      voidedBy: user?.name || 'Unknown',
+    } : s));
+    setSales(nextSales);
+    await saveShared('sales', nextSales);
+
+    const nextInventory = inventory.map((p) => {
+      const found = sale.items.find((i) => i.id === p.id);
+      return found ? { ...p, stock: p.stock + found.qty } : p;
+    });
+    setInventory(nextInventory);
+    await saveShared('inventory', nextInventory);
+
+    setLastSynced(new Date().toLocaleTimeString());
+    return true;
+  };
+
+  // Marks a "sale on account" as collected — used once the customer pays
+  // off what they owe, recording how and by whom.
+  const settleAccountSale = async (saleId, method) => {
+    const nextSales = sales.map((s) => (s.id === saleId ? {
+      ...s,
+      settled: true,
+      settledAt: new Date().toISOString(),
+      settledBy: user?.name || 'Unknown',
+      settledMethod: method || 'cash',
+    } : s));
+    setSales(nextSales);
+    await saveShared('sales', nextSales);
+    setLastSynced(new Date().toLocaleTimeString());
+  };
+
   if (!ready) {
     return (
       <div className="pos-root" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -1690,7 +2063,7 @@ function App() {
   }
 
   if (!user) {
-    return <LoginScreen settings={settings} onLogin={handleLogin} />;
+    return <LoginScreen settings={settings} onLogin={handleLogin} notice={loginNotice} />;
   }
 
   if (user.role === 'admin') {
@@ -1698,14 +2071,15 @@ function App() {
       <AdminConsole inventory={inventory} sales={sales} staffList={staffList} settings={settings}
         user={user} onLogout={handleLogout} lastSynced={lastSynced}
         saveInventory={saveInventory} saveStaff={saveStaffList} saveSettings={saveSettingsFn}
-        inventoryLog={inventoryLog} logInventoryChange={logInventoryChange} />
+        inventoryLog={inventoryLog} logInventoryChange={logInventoryChange}
+        voidSale={voidSale} settleAccountSale={settleAccountSale} />
     );
   }
 
   return (
     <StaffPOS inventory={inventory} sales={sales} settings={settings} user={user}
       addSale={addSale} updateStock={updateStock} lastSynced={lastSynced} onLogout={handleLogout}
-      saveInventory={saveInventory} logInventoryChange={logInventoryChange} />
+      saveInventory={saveInventory} logInventoryChange={logInventoryChange} voidSale={voidSale} />
   );
 }
 
