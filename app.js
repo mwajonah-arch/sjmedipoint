@@ -1319,6 +1319,7 @@ function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, l
   const [tab, setTab] = useState('dashboard');
   const navItems = [
     { key: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
+    { key: 'analytics', label: 'Analytics', Icon: TrendingUp },
     { key: 'inventory', label: 'Inventory', Icon: Package },
     { key: 'activity', label: 'Activity', Icon: Receipt },
     { key: 'sales', label: 'Sales history', Icon: ClipboardList },
@@ -1343,6 +1344,7 @@ function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, l
         </div>
         <div className="pos-admin-content pos-scroll">
           {tab === 'dashboard' && <DashboardTab inventory={inventory} sales={sales} settings={settings} />}
+          {tab === 'analytics' && <AnalyticsTab inventory={inventory} sales={sales} settings={settings} />}
           {tab === 'inventory' && <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} user={user} logInventoryChange={logInventoryChange} />}
           {tab === 'activity' && <ActivityTab inventoryLog={inventoryLog} />}
           {tab === 'sales' && <SalesTab sales={sales} settings={settings} voidSale={voidSale} />}
@@ -1490,7 +1492,411 @@ function DashboardTab({ inventory, sales, settings }) {
   );
 }
 
-const emptyProduct = { name: '', category: '', sku: '', barcode: '', price: '', stock: '', reorderLevel: '', expiry: '', requiresRx: false };
+/* ---------------------------------------------------------------------- */
+/* Advanced analytics                                                     */
+/* ---------------------------------------------------------------------- */
+
+const ANALYTICS_PERIODS = [
+  { days: 30, label: '30 days' },
+  { days: 90, label: '90 days' },
+  { days: 180, label: '180 days' },
+  { days: 365, label: '365 days' },
+];
+
+// Aggregates completed (non-voided) sales from the last `periodDays` into
+// per-product totals — units sold, revenue, and an estimated cost of goods
+// sold. Cost is based on each product's *current* cost price, since sale
+// records only ever stored the selling price, not what it cost at the time
+// — close enough for trend analysis, but not a substitute for real
+// landed-cost accounting. Every product in inventory is included even with
+// zero sales, so dead stock is visible everywhere it should be.
+function buildProductSalesStats(inventory, sales, periodDays) {
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - periodDays);
+
+  const stats = new Map();
+  inventory.forEach((p) => {
+    stats.set(p.id, { product: p, unitsSold: 0, revenue: 0, cost: 0 });
+  });
+
+  sales.forEach((s) => {
+    if (s.voided || new Date(s.timestamp) < cutoff) return;
+    (s.items || []).forEach((item) => {
+      let entry = stats.get(item.id);
+      if (!entry) {
+        // Product has since been deleted from inventory — still counts
+        // toward historical revenue, it just has no live stock to compare.
+        entry = { product: { id: item.id, name: item.name, category: 'Discontinued', costPrice: 0, stock: 0, reorderLevel: 0 }, unitsSold: 0, revenue: 0, cost: 0 };
+        stats.set(item.id, entry);
+      }
+      entry.unitsSold += item.qty;
+      entry.revenue += item.price * item.qty;
+      entry.cost += (Number(entry.product.costPrice) || 0) * item.qty;
+    });
+  });
+
+  return Array.from(stats.values());
+}
+
+function PeriodPicker({ periodDays, setPeriodDays }) {
+  return (
+    <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+      {ANALYTICS_PERIODS.map((p) => (
+        <button key={p.days} onClick={() => setPeriodDays(p.days)} style={{
+          padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+          border: '1px solid var(--border)', background: periodDays === p.days ? 'var(--pine)' : '#fff',
+          color: periodDays === p.days ? '#fff' : 'var(--muted)',
+        }}>{p.label}</button>
+      ))}
+    </div>
+  );
+}
+
+function AnalyticsCard({ title, subtitle, children }) {
+  return (
+    <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, marginBottom: 20 }}>
+      <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 700, marginBottom: subtitle ? 2 : 12 }}>{title}</h3>
+      {subtitle && <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>{subtitle}</p>}
+      {children}
+    </div>
+  );
+}
+
+const badgeStyle = (color, bg) => ({
+  display: 'inline-block', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, color, background: bg,
+});
+
+/* ----- Inventory turnover ------------------------------------------- */
+
+function TurnoverSection({ inventory, sales, periodDays }) {
+  const rows = useMemo(() => {
+    const stats = buildProductSalesStats(inventory, sales, periodDays).filter((r) => r.product.category !== 'Discontinued');
+    return stats.map((r) => {
+      const stock = Math.max(0, Number(r.product.stock) || 0);
+      const dailyRate = r.unitsSold / periodDays;
+      // Turnover rate = units sold / average inventory on hand, annualized.
+      // We don't keep historical stock snapshots, so current stock stands
+      // in for average inventory — a standard approximation for POS systems
+      // without a dedicated inventory-valuation ledger.
+      const annualTurns = stock > 0 ? (dailyRate * 365) / stock : (r.unitsSold > 0 ? Infinity : 0);
+      const daysOfStock = dailyRate > 0 ? stock / dailyRate : null;
+      let status = 'No sales';
+      if (r.unitsSold > 0) status = annualTurns >= 12 ? 'Fast-moving' : annualTurns >= 3 ? 'Normal' : 'Slow-moving';
+      else if (stock > 0) status = 'Dead stock';
+      return { ...r, stock, annualTurns, daysOfStock, status };
+    }).sort((a, b) => b.annualTurns - a.annualTurns);
+  }, [inventory, sales, periodDays]);
+
+  const STATUS_META = {
+    'Fast-moving': badgeStyle('#fff', 'var(--pine)'),
+    'Normal': badgeStyle('var(--ink)', 'var(--bg)'),
+    'Slow-moving': badgeStyle('#8A5A00', 'var(--amber-pale)'),
+    'Dead stock': badgeStyle('var(--red)', 'var(--red-pale)'),
+    'No sales': badgeStyle('var(--muted)', 'var(--bg)'),
+  };
+
+  return (
+    <AnalyticsCard title="Inventory turnover rate" subtitle="How many times each product's stock would cycle in a year, based on units sold in the selected period vs. current stock on hand.">
+      <div className="pos-table-scroll" style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
+        <div style={{ minWidth: 640 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 0.8fr 0.8fr 1fr 1.1fr', padding: '9px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+            <span>Product</span><span>Category</span><span>Units sold</span><span>Stock</span><span>Turnover/yr</span><span>Status</span>
+          </div>
+          {rows.length === 0 && <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)' }}>No products to analyze.</p>}
+          {rows.map((r) => (
+            <div key={r.product.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 0.8fr 0.8fr 1fr 1.1fr', padding: '9px 14px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+              <span>{r.product.name}</span>
+              <span style={{ color: 'var(--muted)', fontSize: 12 }}>{r.product.category}</span>
+              <span className="pos-mono">{r.unitsSold}</span>
+              <span className="pos-mono">{r.stock}</span>
+              <span className="pos-mono">{!isFinite(r.annualTurns) ? 'Sold out' : r.annualTurns.toFixed(1) + 'x'}</span>
+              <span style={badgeStyle(STATUS_META[r.status].color, STATUS_META[r.status].background)}>{r.status}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </AnalyticsCard>
+  );
+}
+
+/* ----- ABC analysis --------------------------------------------------- */
+
+function classifyABC(rows) {
+  const total = rows.reduce((s, r) => s + r.revenue, 0);
+  let cumulative = 0;
+  return rows.map((r) => {
+    cumulative += r.revenue;
+    const cumulativePct = total > 0 ? (cumulative / total) * 100 : 100;
+    const revenueSharePct = total > 0 ? (r.revenue / total) * 100 : 0;
+    const cls = cumulativePct <= 80 ? 'A' : cumulativePct <= 95 ? 'B' : 'C';
+    return { ...r, cumulativePct, revenueSharePct, class: cls };
+  });
+}
+
+function ABCSection({ inventory, sales, settings, periodDays }) {
+  const [filter, setFilter] = useState('All');
+  const ranked = useMemo(() => {
+    const stats = buildProductSalesStats(inventory, sales, periodDays).filter((r) => r.revenue > 0);
+    stats.sort((a, b) => b.revenue - a.revenue);
+    return classifyABC(stats);
+  }, [inventory, sales, periodDays]);
+
+  const summary = ['A', 'B', 'C'].map((cls) => {
+    const items = ranked.filter((r) => r.class === cls);
+    return {
+      cls,
+      count: items.length,
+      revenue: items.reduce((s, r) => s + r.revenue, 0),
+      revenuePct: items.reduce((s, r) => s + r.revenueSharePct, 0),
+    };
+  });
+
+  const CLASS_META = {
+    A: { label: 'A — top priority', color: '#fff', bg: 'var(--pine)' },
+    B: { label: 'B — moderate priority', color: '#8A5A00', bg: 'var(--amber-pale)' },
+    C: { label: 'C — low priority', color: 'var(--muted)', bg: 'var(--bg)' },
+  };
+
+  const visible = filter === 'All' ? ranked : ranked.filter((r) => r.class === filter);
+
+  return (
+    <AnalyticsCard title="ABC inventory analysis" subtitle="Products ranked by revenue contribution in the selected period. A = top ~80% of revenue, B = next ~15%, C = the long tail.">
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 16 }}>
+        {summary.map((s) => (
+          <div key={s.cls} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12 }}>
+            <span style={badgeStyle(CLASS_META[s.cls].color, CLASS_META[s.cls].bg)}>{CLASS_META[s.cls].label}</span>
+            <div className="pos-mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 8 }}>{s.count} products</div>
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.revenuePct.toFixed(1)}% of revenue · {formatMoney(s.revenue, settings.currency)}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
+        {['All', 'A', 'B', 'C'].map((f) => (
+          <button key={f} onClick={() => setFilter(f)} style={{
+            padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
+            border: '1px solid var(--border)', background: filter === f ? 'var(--pine)' : '#fff', color: filter === f ? '#fff' : 'var(--muted)',
+          }}>{f}</button>
+        ))}
+      </div>
+
+      <div className="pos-table-scroll" style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
+        <div style={{ minWidth: 640 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '0.4fr 2fr 1fr 1fr 1fr 1fr 0.6fr', padding: '9px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+            <span>#</span><span>Product</span><span>Category</span><span>Revenue</span><span>% of total</span><span>Cumulative</span><span>Class</span>
+          </div>
+          {visible.length === 0 && <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)' }}>No sales revenue in this period yet.</p>}
+          {visible.map((r, i) => (
+            <div key={r.product.id} style={{ display: 'grid', gridTemplateColumns: '0.4fr 2fr 1fr 1fr 1fr 1fr 0.6fr', padding: '9px 14px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+              <span className="pos-mono" style={{ color: 'var(--muted)' }}>{ranked.indexOf(r) + 1}</span>
+              <span>{r.product.name}</span>
+              <span style={{ color: 'var(--muted)', fontSize: 12 }}>{r.product.category}</span>
+              <span className="pos-mono">{formatMoney(r.revenue, settings.currency)}</span>
+              <span className="pos-mono">{r.revenueSharePct.toFixed(1)}%</span>
+              <span className="pos-mono">{r.cumulativePct.toFixed(1)}%</span>
+              <span style={badgeStyle(CLASS_META[r.class].color, CLASS_META[r.class].bg)}>{r.class}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </AnalyticsCard>
+  );
+}
+
+/* ----- Gross margin ---------------------------------------------------- */
+
+function MarginSection({ inventory, sales, settings, periodDays }) {
+  const missingCostCount = inventory.filter((p) => !(Number(p.costPrice) > 0)).length;
+
+  const productRows = useMemo(() => {
+    return buildProductSalesStats(inventory, sales, periodDays)
+      .filter((r) => r.product.category !== 'Discontinued' && r.revenue > 0)
+      .map((r) => {
+        const hasCost = Number(r.product.costPrice) > 0;
+        const margin = r.revenue - r.cost;
+        const marginPct = hasCost && r.revenue > 0 ? (margin / r.revenue) * 100 : null;
+        return { ...r, hasCost, margin, marginPct };
+      })
+      .sort((a, b) => b.revenue - a.revenue);
+  }, [inventory, sales, periodDays]);
+
+  const categoryRows = useMemo(() => {
+    const map = new Map();
+    productRows.forEach((r) => {
+      const cat = r.product.category || 'Uncategorized';
+      if (!map.has(cat)) map.set(cat, { category: cat, revenue: 0, cost: 0, missingCost: false });
+      const c = map.get(cat);
+      c.revenue += r.revenue;
+      if (r.hasCost) c.cost += r.cost; else c.missingCost = true;
+    });
+    return Array.from(map.values()).map((c) => ({
+      ...c, margin: c.revenue - c.cost, marginPct: c.revenue > 0 ? ((c.revenue - c.cost) / c.revenue) * 100 : null,
+    })).sort((a, b) => b.revenue - a.revenue);
+  }, [productRows]);
+
+  const marginColor = (pct) => {
+    if (pct === null) return 'var(--muted)';
+    if (pct < 15) return 'var(--red)';
+    if (pct < 30) return '#8A5A00';
+    return 'var(--pine)';
+  };
+
+  return (
+    <AnalyticsCard title="Gross margin by product & category" subtitle="Revenue minus cost of goods sold, for the selected period. Set a cost price on a product (Inventory → edit) to include it in margin figures.">
+      {missingCostCount > 0 && (
+        <div style={{ background: 'var(--amber-pale)', color: '#8A5A00', borderRadius: 8, padding: '8px 12px', fontSize: 12, marginBottom: 14 }}>
+          {missingCostCount} product{missingCostCount !== 1 ? 's have' : ' has'} no cost price set, so their margin can't be calculated yet — figures below only reflect products with a cost price on file.
+        </div>
+      )}
+
+      <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>By category</h4>
+      <div style={{ marginBottom: 18 }}>
+        {categoryRows.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No sales revenue in this period yet.</p>}
+        {categoryRows.map((c) => (
+          <div key={c.category} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+            <span>{c.category}{c.missingCost ? <span style={{ color: 'var(--muted)', fontSize: 11 }}> *</span> : ''}</span>
+            <span style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
+              <span className="pos-mono" style={{ color: 'var(--muted)' }}>{formatMoney(c.revenue, settings.currency)}</span>
+              <span className="pos-mono" style={{ fontWeight: 700, color: marginColor(c.marginPct) }}>
+                {c.marginPct === null ? '—' : `${c.marginPct.toFixed(1)}%`}
+              </span>
+            </span>
+          </div>
+        ))}
+        {categoryRows.some((c) => c.missingCost) && <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>* includes at least one product with no cost price — actual margin is likely lower than shown.</p>}
+      </div>
+
+      <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>By product</h4>
+      <div className="pos-table-scroll" style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
+        <div style={{ minWidth: 640 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', padding: '9px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+            <span>Product</span><span>Revenue</span><span>Cost</span><span>Margin</span><span>Margin %</span>
+          </div>
+          {productRows.length === 0 && <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)' }}>No sales revenue in this period yet.</p>}
+          {productRows.map((r) => (
+            <div key={r.product.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', padding: '9px 14px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+              <span>{r.product.name}</span>
+              <span className="pos-mono">{formatMoney(r.revenue, settings.currency)}</span>
+              <span className="pos-mono">{r.hasCost ? formatMoney(r.cost, settings.currency) : '—'}</span>
+              <span className="pos-mono">{r.hasCost ? formatMoney(r.margin, settings.currency) : '—'}</span>
+              <span className="pos-mono" style={{ fontWeight: 700, color: marginColor(r.marginPct) }}>{r.marginPct === null ? '—' : `${r.marginPct.toFixed(1)}%`}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </AnalyticsCard>
+  );
+}
+
+/* ----- Predictive stock forecasting ------------------------------------ */
+
+function ForecastSection({ inventory, sales, settings }) {
+  const LEAD_TIME_DAYS = 14;
+
+  const rows = useMemo(() => {
+    const now = new Date();
+    const recentCutoff = new Date(now); recentCutoff.setDate(now.getDate() - 14);
+    const priorCutoff = new Date(now); priorCutoff.setDate(now.getDate() - 28);
+
+    const recentQty = new Map();
+    const priorQty = new Map();
+    sales.forEach((s) => {
+      if (s.voided) return;
+      const t = new Date(s.timestamp);
+      if (t >= recentCutoff) {
+        (s.items || []).forEach((i) => recentQty.set(i.id, (recentQty.get(i.id) || 0) + i.qty));
+      } else if (t >= priorCutoff) {
+        (s.items || []).forEach((i) => priorQty.set(i.id, (priorQty.get(i.id) || 0) + i.qty));
+      }
+    });
+
+    return inventory.map((p) => {
+      const recent = recentQty.get(p.id) || 0;
+      const prior = priorQty.get(p.id) || 0;
+      const recentDaily = recent / 14;
+      const priorDaily = prior / 14;
+      // Weight the recent window more heavily so the forecast reacts to
+      // fresh trends, but still smooths out single-week noise.
+      const projectedDaily = priorDaily > 0 ? recentDaily * 0.7 + priorDaily * 0.3 : recentDaily;
+
+      let trend = 'steady';
+      if (recentDaily > priorDaily * 1.2 + 0.01) trend = 'rising';
+      else if (recentDaily < priorDaily * 0.8 - 0.01) trend = 'falling';
+
+      const stock = Math.max(0, Number(p.stock) || 0);
+      const daysOfStock = projectedDaily > 0 ? stock / projectedDaily : null;
+      const projectedNeed = projectedDaily * LEAD_TIME_DAYS;
+      const suggestedReorder = Math.max(0, Math.ceil(projectedNeed - stock));
+
+      let urgency = 'ok';
+      if (projectedDaily > 0 && daysOfStock <= 7) urgency = 'urgent';
+      else if (projectedDaily > 0 && daysOfStock <= LEAD_TIME_DAYS) urgency = 'soon';
+      else if (projectedDaily === 0 && stock <= (Number(p.reorderLevel) || 0)) urgency = 'watch';
+
+      return { product: p, stock, recent, prior, projectedDaily, trend, daysOfStock, suggestedReorder, urgency };
+    })
+      .filter((r) => r.recent > 0 || r.prior > 0 || r.stock <= (Number(r.product.reorderLevel) || 0))
+      .sort((a, b) => (a.daysOfStock ?? Infinity) - (b.daysOfStock ?? Infinity));
+  }, [inventory, sales]);
+
+  const TREND_META = {
+    rising: { symbol: '↑', color: '#8A5A00' },
+    falling: { symbol: '↓', color: 'var(--muted)' },
+    steady: { symbol: '→', color: 'var(--muted)' },
+  };
+  const URGENCY_META = {
+    urgent: badgeStyle('#fff', 'var(--red)'),
+    soon: badgeStyle('#8A5A00', 'var(--amber-pale)'),
+    watch: badgeStyle('var(--muted)', 'var(--bg)'),
+    ok: badgeStyle('#fff', 'var(--pine)'),
+  };
+  const URGENCY_LABEL = { urgent: 'Reorder now', soon: 'Reorder soon', watch: 'Watch', ok: 'Healthy' };
+
+  return (
+    <AnalyticsCard title="Predictive stock forecasting" subtitle={`Projects daily demand from the last 28 days of sales (weighted toward the most recent 14) and estimates when each product runs out, assuming a ${LEAD_TIME_DAYS}-day supplier lead time.`}>
+      <div className="pos-table-scroll" style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
+        <div style={{ minWidth: 700 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '2fr 0.9fr 0.9fr 1fr 1fr 1.1fr 1fr', padding: '9px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
+            <span>Product</span><span>Stock</span><span>Trend</span><span>Daily demand</span><span>Days left</span><span>Suggested reorder</span><span>Status</span>
+          </div>
+          {rows.length === 0 && <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)' }}>No recent sales activity or low-stock items to forecast yet.</p>}
+          {rows.map((r) => (
+            <div key={r.product.id} style={{ display: 'grid', gridTemplateColumns: '2fr 0.9fr 0.9fr 1fr 1fr 1.1fr 1fr', padding: '9px 14px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+              <span>{r.product.name}</span>
+              <span className="pos-mono">{r.stock}</span>
+              <span style={{ color: TREND_META[r.trend].color, fontWeight: 700 }}>{TREND_META[r.trend].symbol} {r.trend}</span>
+              <span className="pos-mono">{r.projectedDaily.toFixed(2)}/day</span>
+              <span className="pos-mono">{r.daysOfStock === null ? '—' : Math.round(r.daysOfStock) + 'd'}</span>
+              <span className="pos-mono">{r.suggestedReorder > 0 ? `+${r.suggestedReorder}` : '—'}</span>
+              <span style={badgeStyle(URGENCY_META[r.urgency].color, URGENCY_META[r.urgency].background)}>{URGENCY_LABEL[r.urgency]}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </AnalyticsCard>
+  );
+}
+
+/* ----- Tab shell -------------------------------------------------------- */
+
+function AnalyticsTab({ inventory, sales, settings }) {
+  const [periodDays, setPeriodDays] = useState(90);
+
+  return (
+    <div>
+      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Advanced analytics</h2>
+      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>Turnover, ABC ranking, and margin below use the period selected here. Forecasting always looks at the last 28 days.</p>
+      <PeriodPicker periodDays={periodDays} setPeriodDays={setPeriodDays} />
+
+      <TurnoverSection inventory={inventory} sales={sales} periodDays={periodDays} />
+      <ABCSection inventory={inventory} sales={sales} settings={settings} periodDays={periodDays} />
+      <MarginSection inventory={inventory} sales={sales} settings={settings} periodDays={periodDays} />
+      <ForecastSection inventory={inventory} sales={sales} settings={settings} />
+    </div>
+  );
+}
+
+const emptyProduct = { name: '', category: '', sku: '', barcode: '', price: '', costPrice: '', stock: '', reorderLevel: '', expiry: '', requiresRx: false };
 
 // Builds a short, human-readable summary of what changed between two
 // versions of a product — e.g. "Stock 40 → 60, Price KSh180 → KSh190".
@@ -1500,6 +1906,7 @@ function summarizeProductChange(before, after, settings) {
   const parts = [];
   if (before.name !== after.name) parts.push(`Name "${before.name}" → "${after.name}"`);
   if (Number(before.price) !== Number(after.price)) parts.push(`Price ${formatMoney(before.price, settings.currency)} → ${formatMoney(after.price, settings.currency)}`);
+  if (Number(before.costPrice || 0) !== Number(after.costPrice || 0)) parts.push(`Cost price ${formatMoney(before.costPrice || 0, settings.currency)} → ${formatMoney(after.costPrice || 0, settings.currency)}`);
   if (Number(before.stock) !== Number(after.stock)) parts.push(`Stock ${before.stock} → ${after.stock}`);
   if (Number(before.reorderLevel) !== Number(after.reorderLevel)) parts.push(`Reorder level ${before.reorderLevel} → ${after.reorderLevel}`);
   if (before.expiry !== after.expiry) parts.push(`Expiry ${before.expiry || '—'} → ${after.expiry || '—'}`);
@@ -1616,7 +2023,8 @@ function ProductModal({ product, onClose, onSave }) {
         </div>
         {[
           ['name', 'Product name', 'text'], ['category', 'Category', 'text'], ['sku', 'SKU', 'text'],
-          ['price', 'Price', 'number'], ['stock', 'Stock quantity', 'number'], ['reorderLevel', 'Reorder level', 'number'], ['expiry', 'Expiry date', 'date'],
+          ['price', 'Selling price', 'number'], ['costPrice', 'Cost price (optional — powers margin analytics)', 'number'],
+          ['stock', 'Stock quantity', 'number'], ['reorderLevel', 'Reorder level', 'number'], ['expiry', 'Expiry date', 'date'],
         ].map(([key, label, type]) => (
           <div key={key} style={{ marginBottom: 10 }}>
             <label style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</label>
@@ -1639,7 +2047,7 @@ function ProductModal({ product, onClose, onSave }) {
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 16 }}>
           <input type="checkbox" checked={form.requiresRx} onChange={(e) => set('requiresRx', e.target.checked)} /> Requires a prescription
         </label>
-        <button disabled={!valid} onClick={() => onSave({ ...form, price: parseFloat(form.price) || 0, stock: parseInt(form.stock) || 0, reorderLevel: parseInt(form.reorderLevel) || 0 })}
+        <button disabled={!valid} onClick={() => onSave({ ...form, price: parseFloat(form.price) || 0, costPrice: parseFloat(form.costPrice) || 0, stock: parseInt(form.stock) || 0, reorderLevel: parseInt(form.reorderLevel) || 0 })}
           style={{ width: '100%', padding: '11px 0', borderRadius: 10, border: 'none', background: valid ? 'var(--pine)' : '#B9C4B4', color: '#fff', fontWeight: 600 }}>
           Save product
         </button>
