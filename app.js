@@ -202,6 +202,59 @@ function findProductByCode(inventory, code) {
   return inventory.find((p) => (p.barcode && p.barcode.trim().toLowerCase() === c) || (p.sku && p.sku.trim().toLowerCase() === c)) || null;
 }
 
+// Listens for keystrokes typed extremely fast — the signature of a
+// USB/Bluetooth barcode scanner acting as a keyboard ("HID keyboard
+// wedge") — and reports the completed code, no matter where on the
+// screen focus happens to be. A human typing rarely manages under
+// ~40ms between keystrokes, so that gap is enough to tell a scanner
+// burst apart from someone actually using the keyboard.
+//
+// Deliberately does nothing while an editable field (input, textarea,
+// contenteditable) has focus — those either handle scans themselves
+// already (like the POS search box) or need to receive normal typing
+// untouched. That means a scan only needs to land here when the
+// cashier's focus isn't pinned to a text field, which covers the
+// common case of a scanner gun being used between transactions.
+function useHardwareScanner(onScan, enabled) {
+  const bufferRef = useRef('');
+  const lastKeyTimeRef = useRef(0);
+  const onScanRef = useRef(onScan);
+  onScanRef.current = onScan;
+
+  useEffect(() => {
+    if (!enabled) return;
+    const FAST_KEY_MS = 40;
+    const MIN_CODE_LENGTH = 4;
+
+    const isEditable = (el) => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+
+    const handleKeyDown = (e) => {
+      if (isEditable(e.target)) return;
+
+      const now = Date.now();
+      const gap = now - lastKeyTimeRef.current;
+      lastKeyTimeRef.current = now;
+
+      if (e.key === 'Enter') {
+        const code = bufferRef.current;
+        bufferRef.current = '';
+        if (code.length >= MIN_CODE_LENGTH) {
+          e.preventDefault();
+          onScanRef.current(code);
+        }
+        return;
+      }
+
+      if (e.key.length !== 1) return; // ignore Shift, Tab, arrows, F-keys, etc.
+      if (gap > FAST_KEY_MS) bufferRef.current = ''; // too slow — not a scanner burst, start over
+      bufferRef.current += e.key;
+    };
+
+    document.addEventListener('keydown', handleKeyDown, true);
+    return () => document.removeEventListener('keydown', handleKeyDown, true);
+  }, [enabled]);
+}
+
 function csvCell(value) {
   return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
@@ -492,12 +545,15 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
     });
   };
 
-  // Handles a scanned code from either source: a USB/Bluetooth scanner gun
-  // (which types into the search box and sends Enter) or the camera
-  // scanner modal. Shows a brief flash so the cashier gets feedback
-  // without looking away from the basket they're scanning into.
+  // Handles a scanned code from any source: a USB/Bluetooth scanner gun
+  // (working through the search box, or from anywhere else on this screen
+  // via useHardwareScanner below) or the camera scanner modal. Shows a
+  // brief flash — and a distinct buzz on phones/tablets — so the cashier
+  // gets feedback without needing to look away from the basket.
+  const vibrate = (pattern) => { try { navigator.vibrate && navigator.vibrate(pattern); } catch (e) {} };
   const flashScan = (type, text) => {
     setScanFlash({ type, text });
+    vibrate(type === 'success' ? 40 : [40, 60, 40]);
     clearTimeout(scanFlashTimer.current);
     scanFlashTimer.current = setTimeout(() => setScanFlash(null), 2200);
   };
@@ -515,6 +571,11 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
     addToCart(match);
     flashScan('success', `Added ${match.name}`);
   };
+
+  // A USB/Bluetooth scanner gun works like this anywhere on the sales
+  // screen — not just while the search box is focused — as long as no
+  // other modal (camera scanner, inventory) is already handling scans.
+  useHardwareScanner(handleScanCode, !scannerOpen && !inventoryOpen && !checkoutOpen && !summaryOpen);
 
   const changeQty = (id, delta) => {
     setCart((c) => c.map((i) => {
@@ -581,7 +642,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                     setQuery('');
                   }
                 }}
-                placeholder="Search, or scan with a barcode gun"
+                placeholder="Search, or scan with a barcode gun (works anywhere on this screen)"
                 style={{ width: '100%', padding: '10px 12px 10px 34px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}
               />
             </div>
@@ -980,47 +1041,106 @@ function DrugInfoModal({ product, onClose }) {
 function BarcodeScannerModal({ onDetect, onClose, continuous, subtitle }) {
   const videoRef = useRef(null);
   const controlsRef = useRef(null);
+  const readerRef = useRef(null);
+  const mountedRef = useRef(true);
   const lastSeenRef = useRef({ code: '', at: 0 });
   const [status, setStatus] = useState('starting'); // starting | scanning | error
   const [errorMsg, setErrorMsg] = useState('');
   const [manualCode, setManualCode] = useState('');
   const [lastDetected, setLastDetected] = useState(null);
+  const [devices, setDevices] = useState([]);
+  const [deviceIndex, setDeviceIndex] = useState(0);
+  const [torchOn, setTorchOn] = useState(false);
+  const [torchSupported, setTorchSupported] = useState(false);
+
+  const vibrate = (pattern) => { try { navigator.vibrate && navigator.vibrate(pattern); } catch (e) {} };
+
+  const startCamera = async (deviceId) => {
+    setStatus('starting');
+    setErrorMsg('');
+    setTorchSupported(false);
+    setTorchOn(false);
+    try {
+      const zxing = await import('https://esm.sh/@zxing/browser@0.1.5');
+      if (!mountedRef.current) return;
+      if (!readerRef.current) readerRef.current = new zxing.BrowserMultiFormatReader();
+      const reader = readerRef.current;
+
+      if (controlsRef.current) {
+        try { controlsRef.current.stop(); } catch (e) {}
+        controlsRef.current = null;
+      }
+
+      const onResult = (result) => {
+        if (!result) return;
+        const code = result.getText();
+        const now = Date.now();
+        // Ignore the same code re-firing while it's still in frame.
+        if (lastSeenRef.current.code === code && now - lastSeenRef.current.at < 2000) return;
+        lastSeenRef.current = { code, at: now };
+        setLastDetected(code);
+        vibrate(60);
+        onDetect(code);
+      };
+
+      // No specific device yet — default to the rear/environment camera,
+      // which is what you want on a phone or tablet. Once we have a live
+      // stream we can list every camera and let the person switch.
+      const controls = deviceId
+        ? await reader.decodeFromVideoDevice(deviceId, videoRef.current, onResult)
+        : await reader.decodeFromConstraints({ video: { facingMode: { ideal: 'environment' } } }, videoRef.current, onResult);
+
+      if (!mountedRef.current) { try { controls.stop(); } catch (e) {} return; }
+      controlsRef.current = controls;
+      setStatus('scanning');
+
+      try {
+        const inputs = await zxing.BrowserCodeReader.listVideoInputDevices();
+        if (mountedRef.current) setDevices(inputs);
+      } catch (e) { /* device listing is a nice-to-have, not required */ }
+
+      // Torch (flashlight) support varies a lot by device and browser —
+      // only show the toggle when the live stream actually exposes it.
+      try {
+        const stream = videoRef.current && videoRef.current.srcObject;
+        const track = stream && stream.getVideoTracks()[0];
+        const caps = track && track.getCapabilities && track.getCapabilities();
+        if (mountedRef.current) setTorchSupported(!!(caps && caps.torch));
+      } catch (e) { /* ignore — leave torch hidden */ }
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setStatus('error');
+      setErrorMsg(err && err.name === 'NotAllowedError' ? 'Camera access was denied.' : "Couldn't start the camera scanner on this device.");
+    }
+  };
 
   useEffect(() => {
-    let cancelled = false;
-
-    (async () => {
-      try {
-        const { BrowserMultiFormatReader } = await import('https://esm.sh/@zxing/browser@0.1.5');
-        if (cancelled) return;
-        const reader = new BrowserMultiFormatReader();
-        const controls = await reader.decodeFromVideoDevice(undefined, videoRef.current, (result) => {
-          if (!result) return;
-          const code = result.getText();
-          const now = Date.now();
-          // Ignore the same code re-firing while it's still in frame.
-          if (lastSeenRef.current.code === code && now - lastSeenRef.current.at < 2000) return;
-          lastSeenRef.current = { code, at: now };
-          setLastDetected(code);
-          onDetect(code);
-        });
-        if (cancelled) { try { controls.stop(); } catch (e) {} return; }
-        controlsRef.current = controls;
-        setStatus('scanning');
-      } catch (err) {
-        if (cancelled) return;
-        setStatus('error');
-        setErrorMsg(err && err.name === 'NotAllowedError' ? 'Camera access was denied.' : "Couldn't start the camera scanner on this device.");
-      }
-    })();
-
+    mountedRef.current = true;
+    startCamera(null);
     return () => {
-      cancelled = true;
+      mountedRef.current = false;
       if (controlsRef.current) {
         try { controlsRef.current.stop(); } catch (e) {}
       }
     };
   }, []);
+
+  const switchCamera = () => {
+    if (devices.length < 2) return;
+    const nextIndex = (deviceIndex + 1) % devices.length;
+    setDeviceIndex(nextIndex);
+    startCamera(devices[nextIndex].deviceId);
+  };
+
+  const toggleTorch = async () => {
+    if (!controlsRef.current || !controlsRef.current.switchTorch) return;
+    try {
+      await controlsRef.current.switchTorch(!torchOn);
+      setTorchOn((t) => !t);
+    } catch (e) {
+      setTorchSupported(false);
+    }
+  };
 
   const submitManual = () => {
     const code = manualCode.trim();
@@ -1040,11 +1160,25 @@ function BarcodeScannerModal({ onDetect, onClose, continuous, subtitle }) {
         {subtitle && <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: -4, marginBottom: 12 }}>{subtitle}</p>}
 
         {status !== 'error' && (
-          <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#000', marginBottom: 12 }}>
+          <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#000', marginBottom: 8 }}>
             <video ref={videoRef} style={{ width: '100%', display: 'block', maxHeight: 240, objectFit: 'cover' }} muted playsInline />
             {status === 'starting' && (
               <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12 }}>
                 Starting camera…
+              </div>
+            )}
+            {status === 'scanning' && (devices.length > 1 || torchSupported) && (
+              <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
+                {devices.length > 1 && (
+                  <button onClick={switchCamera} title="Switch camera" style={{
+                    background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 600
+                  }}>⟳ Switch camera</button>
+                )}
+                {torchSupported && (
+                  <button onClick={toggleTorch} title="Toggle flashlight" style={{
+                    background: torchOn ? 'var(--pine)' : 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 600
+                  }}>💡 {torchOn ? 'On' : 'Off'}</button>
+                )}
               </div>
             )}
           </div>
@@ -1052,8 +1186,12 @@ function BarcodeScannerModal({ onDetect, onClose, continuous, subtitle }) {
 
         {status === 'error' && (
           <div style={{ background: 'var(--amber-pale)', color: '#5C3A12', borderRadius: 8, padding: 10, fontSize: 12, marginBottom: 12 }}>
-            {errorMsg} You can still type the code below — or use a USB/Bluetooth scanner gun, which works straight into the search box.
+            {errorMsg} You can still type the code below — or use a USB/Bluetooth scanner gun, which works anywhere on the sales screen.
           </div>
+        )}
+
+        {status === 'scanning' && (
+          <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>Hold the barcode steady a few inches from the camera, inside good light.</p>
         )}
 
         {lastDetected && (
@@ -2013,6 +2151,10 @@ function ProductModal({ product, onClose, onSave }) {
   const [scannerOpen, setScannerOpen] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const valid = form.name && form.category && form.sku && form.price !== '' && form.stock !== '';
+
+  // Lets a hardware scanner gun fill the barcode field even if focus
+  // isn't sitting in that input (e.g. admin just clicked into the modal).
+  useHardwareScanner((code) => set('barcode', code), !scannerOpen);
 
   return (
     <div className="pos-modal-backdrop">
