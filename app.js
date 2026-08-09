@@ -4,7 +4,7 @@ import {
   ShoppingCart, Plus, Minus, Trash2, Search, LogOut, Package, TrendingUp,
   AlertTriangle, Users, Settings as SettingsIcon, Receipt, CheckCircle, X,
   Pill, Edit2, ChevronRight, Banknote, CreditCard, Smartphone, LayoutDashboard,
-  ClipboardList, Info, Wallet
+  ClipboardList, Info
 } from 'https://esm.sh/lucide-react@0.383.0?deps=react@18';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -58,12 +58,12 @@ const DEFAULT_INVENTORY = [
 ];
 
 const DEFAULT_STAFF = [
-  { id: 's1', name: 'Admin', pin: '1234', role: 'admin' },
-  { id: 's2', name: 'Grace Wanjiru', pin: '1111', role: 'staff' },
-  { id: 's3', name: 'Kevin Otieno', pin: '2222', role: 'staff' },
+  { id: 's1', name: 'Admin', role: 'admin' },
+  { id: 's2', name: 'Grace Wanjiru', role: 'staff', canManageInventory: false },
+  { id: 's3', name: 'Kevin Otieno', role: 'staff', canManageInventory: false },
 ];
 
-const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxRate: 16, sessionTimeoutMinutes: 10 };
+const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxRate: 16 };
 
 /* ---------------------------------------------------------------------- */
 /* Storage helpers — backed by Supabase, shared across every device       */
@@ -75,7 +75,7 @@ const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxR
 /* reports it's back online — until they successfully sync.               */
 /* ---------------------------------------------------------------------- */
 
-const STORE_KEYS = ['inventory', 'sales', 'staff', 'settings', 'customers'];
+const STORE_KEYS = ['inventory', 'sales', 'staff', 'settings', 'inventoryLog'];
 const CACHE_PREFIX = 'pos_cache_';
 const DIRTY_PREFIX = 'pos_dirty_';
 
@@ -261,25 +261,36 @@ const STYLES = `
 /* Login                                                                   */
 /* ---------------------------------------------------------------------- */
 
-function LoginScreen({ staffList, settings, onLogin }) {
+function LoginScreen({ settings, onLogin }) {
   const [tab, setTab] = useState('staff');
   const [pin, setPin] = useState('');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
   const inputRef = useRef(null);
 
   useEffect(() => {
     inputRef.current?.focus();
   }, [tab]);
 
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
-    const match = staffList.find((s) => s.pin === pin && s.role === tab);
-    if (match) {
-      onLogin(match);
-    } else {
-      setError('Incorrect PIN for this login type.');
-      setPin('');
-      inputRef.current?.focus();
+    setLoading(true);
+    setError('');
+    try {
+      // PIN checking happens server-side now — the browser never holds
+      // the full staff/PIN list, so there's nothing here to inspect.
+      const { data, error: fnError } = await supabase.functions.invoke('staff-login', { body: { pin, role: tab } });
+      if (fnError || !data || data.error || !data.user) {
+        setError((data && data.error) || (fnError && fnError.message) || 'Incorrect PIN for this login type.');
+        setPin('');
+        inputRef.current?.focus();
+        return;
+      }
+      onLogin(data.user);
+    } catch (err) {
+      setError('Could not reach the login service. Check your connection.');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -328,10 +339,10 @@ function LoginScreen({ staffList, settings, onLogin }) {
 
           {error && <p style={{ color: 'var(--red)', fontSize: 12, marginBottom: 12 }}>{error}</p>}
 
-          <button type="submit" disabled={!pin} style={{
+          <button type="submit" disabled={!pin || loading} style={{
             width: '100%', padding: '13px 0', borderRadius: 10, border: 'none', fontSize: 15, fontWeight: 600,
-            background: pin ? 'var(--pine)' : '#B9C4B4', color: '#fff'
-          }}>Log in</button>
+            background: pin && !loading ? 'var(--pine)' : '#B9C4B4', color: '#fff'
+          }}>{loading ? 'Checking…' : 'Log in'}</button>
         </form>
       </div>
     </div>
@@ -372,7 +383,7 @@ function TopBar({ settings, user, onLogout, lastSynced, right }) {
 /* Staff / Cashier POS                                                     */
 /* ---------------------------------------------------------------------- */
 
-function StaffPOS({ inventory, sales, settings, user, customers, addSale, updateStock, lastSynced, onLogout, chargeToAccount }) {
+function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, lastSynced, onLogout, saveInventory, logInventoryChange }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [cart, setCart] = useState([]);
@@ -381,8 +392,9 @@ function StaffPOS({ inventory, sales, settings, user, customers, addSale, update
   const [cartOpen, setCartOpen] = useState(false);
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
+  const [inventoryOpen, setInventoryOpen] = useState(false);
 
-  const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()) && !s.voided);
+  const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()));
   const myTodayRevenue = myTodaySales.reduce((sum, s) => sum + s.total, 0);
 
   const categories = ['All', ...Array.from(new Set(inventory.map((p) => p.category)))];
@@ -432,14 +444,9 @@ function StaffPOS({ inventory, sales, settings, user, customers, addSale, update
       amountTendered: payment.tendered ?? total,
       change: payment.change ?? 0,
       mpesaReceipt: payment.mpesaReceipt || null,
-      customerId: payment.customerId || null,
-      customerName: payment.customerName || null,
     };
     addSale(sale);
     updateStock(cart.map((i) => ({ id: i.id, qty: i.qty })));
-    if (payment.method === 'credit' && payment.customerId) {
-      chargeToAccount(payment.customerId, total);
-    }
     setReceipt(sale);
     setCart([]);
     setCheckoutOpen(false);
@@ -467,6 +474,15 @@ function StaffPOS({ inventory, sales, settings, user, customers, addSale, update
             <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
+            {user.canManageInventory && (
+              <button onClick={() => setInventoryOpen(true)} style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
+                border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
+              }}>
+                <Package size={15} color="var(--pine)" />
+                Manage Inventory
+              </button>
+            )}
             <button onClick={() => setSummaryOpen(true)} style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
               border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
@@ -579,12 +595,20 @@ function StaffPOS({ inventory, sales, settings, user, customers, addSale, update
       </div>
 
       {checkoutOpen && (
-        <CheckoutModal cart={cart} subtotal={subtotal} tax={tax} total={total} settings={settings} customers={customers}
+        <CheckoutModal cart={cart} subtotal={subtotal} tax={tax} total={total} settings={settings}
           onClose={() => setCheckoutOpen(false)} onComplete={completeSale} />
       )}
       {receipt && <ReceiptModal sale={receipt} settings={settings} onClose={() => { setReceipt(null); setCartOpen(false); }} />}
       {summaryOpen && <CashierSummaryModal sales={sales} settings={settings} user={user} onClose={() => setSummaryOpen(false)} />}
       {drugInfoProduct && <DrugInfoModal product={drugInfoProduct} onClose={() => setDrugInfoProduct(null)} />}
+      {inventoryOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 95, overflow: 'auto', padding: 20 }} className="pos-scroll">
+          <button onClick={() => setInventoryOpen(false)} style={{ marginBottom: 16, background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ChevronRight size={14} style={{ transform: 'rotate(180deg)' }} /> Back to sales
+          </button>
+          <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} user={user} logInventoryChange={logInventoryChange} />
+        </div>
+      )}
     </div>
   );
 }
@@ -593,7 +617,6 @@ const PAYMENT_METHOD_META = {
   cash: { label: 'Cash', Icon: Banknote },
   card: { label: 'Card', Icon: CreditCard },
   mpesa: { label: 'M-Pesa', Icon: Smartphone },
-  credit: { label: 'Account', Icon: Users },
 };
 
 // Simple, dependency-free bar breakdown — reused by the cashier's daily
@@ -632,7 +655,7 @@ function PaymentMethodBars({ sales, settings }) {
 function CashierSummaryModal({ sales, settings, user, onClose }) {
   const today = new Date();
   const mySales = sales
-    .filter((s) => s.cashier === user.name && isSameDay(s.timestamp, today) && !s.voided)
+    .filter((s) => s.cashier === user.name && isSameDay(s.timestamp, today))
     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
   const revenue = mySales.reduce((sum, s) => sum + s.total, 0);
 
@@ -764,7 +787,7 @@ function DrugInfoModal({ product, onClose }) {
   );
 }
 
-function CheckoutModal({ cart, subtotal, tax, total, settings, customers, onClose, onComplete }) {
+function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComplete }) {
   const [method, setMethod] = useState('cash');
   const [tendered, setTendered] = useState('');
   const [rxConfirmed, setRxConfirmed] = useState(false);
@@ -772,13 +795,11 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, customers, onClos
   const [mpesaStatus, setMpesaStatus] = useState('idle'); // idle | sending | waiting | success | failed | timeout
   const [mpesaError, setMpesaError] = useState('');
   const [mpesaReceipt, setMpesaReceipt] = useState(null);
-  const [customerId, setCustomerId] = useState('');
-  const [customerQuery, setCustomerQuery] = useState('');
   const pollTimer = useRef(null);
   const needsRx = cart.some((i) => i.requiresRx);
   const tenderedNum = parseFloat(tendered) || 0;
   const change = method === 'cash' ? Math.max(0, tenderedNum - total) : 0;
-  const canComplete = (!needsRx || rxConfirmed) && (method !== 'cash' || tenderedNum >= total) && (method !== 'credit' || !!customerId);
+  const canComplete = (!needsRx || rxConfirmed) && (method !== 'cash' || tenderedNum >= total);
 
   useEffect(() => () => { if (pollTimer.current) clearInterval(pollTimer.current); }, []);
 
@@ -857,7 +878,6 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, customers, onClos
             { key: 'cash', label: 'Cash', Icon: Banknote },
             { key: 'card', label: 'Card', Icon: CreditCard },
             { key: 'mpesa', label: 'M-Pesa', Icon: Smartphone },
-            { key: 'credit', label: 'Account', Icon: Users },
           ].map(({ key, label, Icon }) => (
             <button key={key} onClick={() => setMethod(key)} style={{
               flex: 1, padding: '10px 0', borderRadius: 10, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
@@ -923,46 +943,6 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, customers, onClos
           </div>
         )}
 
-        {method === 'credit' && (
-          <div style={{ marginBottom: 16 }}>
-            {!customerId ? (
-              <>
-                <label style={{ fontSize: 12, color: 'var(--muted)' }}>Search customer by name or phone</label>
-                <input value={customerQuery} onChange={(e) => setCustomerQuery(e.target.value)} placeholder="Start typing…"
-                  style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 14, marginTop: 4, marginBottom: 8 }} />
-                <div style={{ maxHeight: 160, overflowY: 'auto' }} className="pos-scroll">
-                  {customers
-                    .filter((c) => !customerQuery || c.name.toLowerCase().includes(customerQuery.toLowerCase()) || (c.phone || '').includes(customerQuery))
-                    .map((c) => (
-                      <button key={c.id} type="button" onClick={() => setCustomerId(c.id)} style={{
-                        width: '100%', textAlign: 'left', padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)',
-                        background: '#fff', marginBottom: 6, display: 'flex', justifyContent: 'space-between', fontSize: 13
-                      }}>
-                        <span>{c.name}{c.phone ? ` · ${c.phone}` : ''}</span>
-                        <span className="pos-mono" style={{ color: (c.balance || 0) > 0 ? 'var(--red)' : 'var(--muted)' }}>{formatMoney(c.balance || 0, settings.currency)} owed</span>
-                      </button>
-                    ))}
-                  {customers.length === 0 && <p style={{ fontSize: 12, color: 'var(--muted)' }}>No customer accounts yet — add one from Admin → Customers.</p>}
-                  {customers.length > 0 && customerQuery && customers.filter((c) => c.name.toLowerCase().includes(customerQuery.toLowerCase()) || (c.phone || '').includes(customerQuery)).length === 0 && (
-                    <p style={{ fontSize: 12, color: 'var(--muted)' }}>No match — ask an admin to add this customer under Admin → Customers.</p>
-                  )}
-                </div>
-              </>
-            ) : (() => {
-              const c = customers.find((x) => x.id === customerId);
-              return (
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--pine)', background: 'var(--pine-pale)' }}>
-                  <div>
-                    <div style={{ fontSize: 13, fontWeight: 600 }}>{c ? c.name : 'Unknown customer'}</div>
-                    <div style={{ fontSize: 11, color: 'var(--muted)' }}>Current balance: {formatMoney(c ? (c.balance || 0) : 0, settings.currency)} → will become {formatMoney((c ? (c.balance || 0) : 0) + total, settings.currency)}</div>
-                  </div>
-                  <button type="button" onClick={() => setCustomerId('')} style={{ background: 'none', border: 'none', color: 'var(--muted)', fontSize: 12 }}>Change</button>
-                </div>
-              );
-            })()}
-          </div>
-        )}
-
         {needsRx && (
           <label style={{ display: 'flex', gap: 8, alignItems: 'flex-start', fontSize: 12, marginBottom: 16, padding: 10, background: 'var(--amber-pale)', borderRadius: 8, color: '#5C3A12' }}>
             <input type="checkbox" checked={rxConfirmed} onChange={(e) => setRxConfirmed(e.target.checked)} style={{ marginTop: 2 }} />
@@ -971,16 +951,10 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, customers, onClos
         )}
 
         {method !== 'mpesa' && (
-          <button onClick={() => {
-            const c = method === 'credit' ? customers.find((x) => x.id === customerId) : null;
-            onComplete({
-              method, tendered: method === 'cash' ? tenderedNum : total, change,
-              customerId: c ? c.id : null, customerName: c ? c.name : null,
-            });
-          }} disabled={!canComplete} style={{
+          <button onClick={() => onComplete({ method, tendered: method === 'cash' ? tenderedNum : total, change })} disabled={!canComplete} style={{
             width: '100%', padding: '12px 0', borderRadius: 10, border: 'none', fontWeight: 600, fontSize: 15,
             background: canComplete ? 'var(--pine)' : '#B9C4B4', color: '#fff'
-          }}>{method === 'credit' ? 'Confirm — add to account' : 'Confirm payment'}</button>
+          }}>Confirm payment</button>
         )}
       </div>
     </div>
@@ -1026,14 +1000,14 @@ function ReceiptModal({ sale, settings, onClose }) {
 /* Admin console                                                          */
 /* ---------------------------------------------------------------------- */
 
-function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, lastSynced, customers,
-  saveInventory, saveStaff, saveSettings, voidSale, saveCustomers }) {
+function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, lastSynced,
+  saveInventory, saveStaff, saveSettings, inventoryLog, logInventoryChange }) {
   const [tab, setTab] = useState('dashboard');
   const navItems = [
     { key: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
     { key: 'inventory', label: 'Inventory', Icon: Package },
+    { key: 'activity', label: 'Activity', Icon: Receipt },
     { key: 'sales', label: 'Sales history', Icon: ClipboardList },
-    { key: 'customers', label: 'Credit accounts', Icon: Wallet },
     { key: 'staff', label: 'Staff', Icon: Users },
     { key: 'settings', label: 'Settings', Icon: SettingsIcon },
   ];
@@ -1054,9 +1028,9 @@ function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, l
         </div>
         <div className="pos-admin-content pos-scroll">
           {tab === 'dashboard' && <DashboardTab inventory={inventory} sales={sales} settings={settings} />}
-          {tab === 'inventory' && <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} />}
-          {tab === 'sales' && <SalesTab sales={sales} settings={settings} voidSale={voidSale} />}
-          {tab === 'customers' && <CustomersTab customers={customers} sales={sales} settings={settings} saveCustomers={saveCustomers} />}
+          {tab === 'inventory' && <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} user={user} logInventoryChange={logInventoryChange} />}
+          {tab === 'activity' && <ActivityTab inventoryLog={inventoryLog} />}
+          {tab === 'sales' && <SalesTab sales={sales} settings={settings} />}
           {tab === 'staff' && <StaffTab staffList={staffList} saveStaff={saveStaff} />}
           {tab === 'settings' && <SettingsTab settings={settings} saveSettings={saveSettings} />}
         </div>
@@ -1082,7 +1056,7 @@ function RevenueTrend({ sales, settings }) {
     for (let i = 6; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
-      const daySales = sales.filter((s) => isSameDay(s.timestamp, d) && !s.voided);
+      const daySales = sales.filter((s) => isSameDay(s.timestamp, d));
       arr.push({
         label: d.toLocaleDateString(undefined, { weekday: 'short' }),
         dateLabel: d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' }),
@@ -1128,17 +1102,10 @@ function RevenueTrend({ sales, settings }) {
 
 function DashboardTab({ inventory, sales, settings }) {
   const today = new Date();
-  const todaySales = sales.filter((s) => isSameDay(s.timestamp, today) && !s.voided);
+  const todaySales = sales.filter((s) => isSameDay(s.timestamp, today));
   const revenue = todaySales.reduce((sum, s) => sum + s.total, 0);
   const lowStock = inventory.filter((p) => p.stock <= p.reorderLevel);
   const recent = [...sales].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 6);
-
-  const now = new Date();
-  const in30Days = new Date(now); in30Days.setDate(in30Days.getDate() + 30);
-  const expiringSoon = inventory
-    .filter((p) => p.expiry && new Date(p.expiry) <= in30Days)
-    .sort((a, b) => new Date(a.expiry) - new Date(b.expiry));
-  const expiredCount = expiringSoon.filter((p) => new Date(p.expiry) < now).length;
 
   return (
     <div>
@@ -1148,7 +1115,6 @@ function DashboardTab({ inventory, sales, settings }) {
         <StatCard label="Transactions today" value={todaySales.length} />
         <StatCard label="Products tracked" value={inventory.length} />
         <StatCard label="Low stock alerts" value={lowStock.length} accent={lowStock.length ? 'var(--red)' : undefined} />
-        <StatCard label="Expiring within 30 days" value={expiringSoon.length} accent={expiringSoon.length ? 'var(--red)' : undefined} />
       </div>
 
       <div className="pos-dash-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
@@ -1174,31 +1140,13 @@ function DashboardTab({ inventory, sales, settings }) {
         </div>
         <div>
           <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <AlertTriangle size={15} color="var(--red)" /> Expiring soon
-          </h3>
-          {expiringSoon.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>Nothing expiring in the next 30 days.</p>}
-          {expiringSoon.map((p) => {
-            const expired = new Date(p.expiry) < now;
-            return (
-              <div key={p.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-                <span>{p.name}</span>
-                <span className="pos-mono" style={{ color: 'var(--red)' }}>{expired ? 'Expired' : 'Expires'} {new Date(p.expiry).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</span>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
-      <div className="pos-dash-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
-        <div>
-          <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Receipt size={15} /> Recent transactions
           </h3>
           {recent.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No sales recorded yet.</p>}
           {recent.map((s) => (
             <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-              <span>{s.cashier} · {new Date(s.timestamp).toLocaleTimeString()}{s.voided ? ' · voided' : ''}</span>
-              <span className="pos-mono" style={{ textDecoration: s.voided ? 'line-through' : 'none', color: s.voided ? 'var(--muted)' : 'var(--ink)' }}>{formatMoney(s.total, settings.currency)}</span>
+              <span>{s.cashier} · {new Date(s.timestamp).toLocaleTimeString()}</span>
+              <span className="pos-mono">{formatMoney(s.total, settings.currency)}</span>
             </div>
           ))}
         </div>
@@ -1209,7 +1157,24 @@ function DashboardTab({ inventory, sales, settings }) {
 
 const emptyProduct = { name: '', category: '', sku: '', price: '', stock: '', reorderLevel: '', expiry: '', requiresRx: false };
 
-function InventoryTab({ inventory, settings, saveInventory }) {
+// Builds a short, human-readable summary of what changed between two
+// versions of a product — e.g. "Stock 40 → 60, Price KSh180 → KSh190".
+// Only reports fields that actually changed, so a name-only edit doesn't
+// show a wall of unchanged numbers.
+function summarizeProductChange(before, after, settings) {
+  const parts = [];
+  if (before.name !== after.name) parts.push(`Name "${before.name}" → "${after.name}"`);
+  if (Number(before.price) !== Number(after.price)) parts.push(`Price ${formatMoney(before.price, settings.currency)} → ${formatMoney(after.price, settings.currency)}`);
+  if (Number(before.stock) !== Number(after.stock)) parts.push(`Stock ${before.stock} → ${after.stock}`);
+  if (Number(before.reorderLevel) !== Number(after.reorderLevel)) parts.push(`Reorder level ${before.reorderLevel} → ${after.reorderLevel}`);
+  if (before.expiry !== after.expiry) parts.push(`Expiry ${before.expiry || '—'} → ${after.expiry || '—'}`);
+  if (before.category !== after.category) parts.push(`Category ${before.category} → ${after.category}`);
+  if (before.sku !== after.sku) parts.push(`SKU ${before.sku} → ${after.sku}`);
+  if (!!before.requiresRx !== !!after.requiresRx) parts.push(after.requiresRx ? 'Marked as Rx' : 'Unmarked as Rx');
+  return parts.length ? parts.join(', ') : 'No field changes';
+}
+
+function InventoryTab({ inventory, settings, saveInventory, user, logInventoryChange }) {
   const [modalProduct, setModalProduct] = useState(null); // null = closed, {} = new, obj = edit
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [query, setQuery] = useState('');
@@ -1218,14 +1183,43 @@ function InventoryTab({ inventory, settings, saveInventory }) {
 
   const upsert = (product) => {
     if (product.id) {
+      const before = inventory.find((p) => p.id === product.id);
       saveInventory(inventory.map((p) => (p.id === product.id ? product : p)));
+      if (logInventoryChange && before) {
+        logInventoryChange({
+          action: 'edit',
+          productName: product.name,
+          sku: product.sku,
+          detail: summarizeProductChange(before, product, settings),
+        });
+      }
     } else {
-      saveInventory([...inventory, { ...product, id: genId('p') }]);
+      const created = { ...product, id: genId('p') };
+      saveInventory([...inventory, created]);
+      if (logInventoryChange) {
+        logInventoryChange({
+          action: 'add',
+          productName: created.name,
+          sku: created.sku,
+          detail: `Added with ${created.stock} in stock at ${formatMoney(created.price, settings.currency)}`,
+        });
+      }
     }
     setModalProduct(null);
   };
 
-  const remove = (id) => saveInventory(inventory.filter((p) => p.id !== id));
+  const remove = (id) => {
+    const product = inventory.find((p) => p.id === id);
+    saveInventory(inventory.filter((p) => p.id !== id));
+    if (logInventoryChange && product) {
+      logInventoryChange({
+        action: 'delete',
+        productName: product.name,
+        sku: product.sku,
+        detail: `Removed (had ${product.stock} in stock)`,
+      });
+    }
+  };
 
   return (
     <div>
@@ -1301,12 +1295,69 @@ function ProductModal({ product, onClose, onSave }) {
   );
 }
 
-function SalesTab({ sales, settings, voidSale }) {
+const ACTIVITY_ACTION_META = {
+  add: { label: 'Added', color: 'var(--pine)', bg: 'var(--pine-pale)' },
+  edit: { label: 'Edited', color: 'var(--amber)', bg: 'var(--amber-pale)' },
+  delete: { label: 'Deleted', color: 'var(--red)', bg: 'var(--red-pale)' },
+};
+
+function ActivityTab({ inventoryLog }) {
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+  const [staffFilter, setStaffFilter] = useState('All');
+
+  const staffNames = ['All', ...Array.from(new Set(inventoryLog.map((e) => e.staffName)))];
+
+  const filtered = inventoryLog.filter((e) => {
+    const d = new Date(e.timestamp);
+    if (from && d < new Date(from)) return false;
+    if (to && d > new Date(to + 'T23:59:59')) return false;
+    if (staffFilter !== 'All' && e.staffName !== staffFilter) return false;
+    return true;
+  }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+  return (
+    <div>
+      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Inventory activity</h2>
+      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>Every product added, edited, or removed — by admin or staff with inventory access.</p>
+
+      <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+        <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+        <span style={{ color: 'var(--muted)', fontSize: 13 }}>to</span>
+        <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+        <select value={staffFilter} onChange={(e) => setStaffFilter(e.target.value)} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }}>
+          {staffNames.map((n) => <option key={n} value={n}>{n}</option>)}
+        </select>
+        <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--muted)' }}>{filtered.length} change{filtered.length !== 1 ? 's' : ''}</span>
+      </div>
+
+      <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
+        {filtered.length === 0 && <p style={{ padding: 16, fontSize: 13, color: 'var(--muted)' }}>No inventory changes in this range.</p>}
+        {filtered.map((e) => {
+          const meta = ACTIVITY_ACTION_META[e.action] || ACTIVITY_ACTION_META.edit;
+          return (
+            <div key={e.id} style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4, flexWrap: 'wrap', gap: 6 }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 6, background: meta.bg, color: meta.color }}>{meta.label}</span>
+                  <span style={{ fontWeight: 600 }}>{e.productName}</span>
+                  {e.sku && <span className="pos-mono" style={{ fontSize: 11, color: 'var(--muted)' }}>{e.sku}</span>}
+                </span>
+                <span style={{ fontSize: 12, color: 'var(--muted)' }}>{e.staffName} · {new Date(e.timestamp).toLocaleString()}</span>
+              </div>
+              <div style={{ fontSize: 12.5, color: 'var(--muted)', paddingLeft: 2 }}>{e.detail}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function SalesTab({ sales, settings }) {
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [expanded, setExpanded] = useState(null);
-  const [voidingId, setVoidingId] = useState(null);
-  const [voidReason, setVoidReason] = useState('');
 
   const filtered = sales.filter((s) => {
     const d = new Date(s.timestamp);
@@ -1315,36 +1366,7 @@ function SalesTab({ sales, settings, voidSale }) {
     return true;
   }).sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
 
-  const total = filtered.filter((s) => !s.voided).reduce((sum, s) => sum + s.total, 0);
-
-  const exportCsv = () => {
-    const rows = [
-      ['Date', 'Time', 'Cashier', 'Items', 'Subtotal', 'Tax', 'Total', 'Payment method', 'Status'],
-      ...filtered.map((s) => [
-        new Date(s.timestamp).toLocaleDateString(),
-        new Date(s.timestamp).toLocaleTimeString(),
-        s.cashier,
-        s.items.map((i) => `${i.qty}x ${i.name}`).join('; '),
-        s.subtotal, s.tax, s.total, s.paymentMethod,
-        s.voided ? `Voided${s.voidReason ? ' - ' + s.voidReason : ''}` : 'Completed',
-      ]),
-    ];
-    const csv = rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    const rangeLabel = (from || to) ? `${from || 'start'}_to_${to || 'now'}` : 'all';
-    a.href = url;
-    a.download = `sales-${rangeLabel}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-
-  const confirmVoid = (saleId) => {
-    voidSale(saleId, voidReason);
-    setVoidingId(null);
-    setVoidReason('');
-  };
+  const total = filtered.reduce((sum, s) => sum + s.total, 0);
 
   return (
     <div>
@@ -1353,7 +1375,6 @@ function SalesTab({ sales, settings, voidSale }) {
         <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
         <span style={{ color: 'var(--muted)', fontSize: 13 }}>to</span>
         <input type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
-        <button onClick={exportCsv} style={{ padding: '8px 12px', borderRadius: 8, border: '1px solid var(--border)', background: '#fff', fontSize: 12.5, fontWeight: 600, color: 'var(--pine)' }}>Export CSV</button>
         <span style={{ marginLeft: 'auto', fontSize: 13, color: 'var(--muted)' }}>{filtered.length} transactions · <b className="pos-mono" style={{ color: 'var(--ink)' }}>{formatMoney(total, settings.currency)}</b></span>
       </div>
 
@@ -1361,13 +1382,12 @@ function SalesTab({ sales, settings, voidSale }) {
         {filtered.length === 0 && <p style={{ padding: 16, fontSize: 13, color: 'var(--muted)' }}>No transactions in this range.</p>}
         {filtered.map((s) => (
           <div key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
-            <div onClick={() => setExpanded(expanded === s.id ? null : s.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer', fontSize: 13, opacity: s.voided ? 0.55 : 1 }}>
+            <div onClick={() => setExpanded(expanded === s.id ? null : s.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer', fontSize: 13 }}>
               <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                 <ChevronRight size={13} style={{ transform: expanded === s.id ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }} />
                 {new Date(s.timestamp).toLocaleString()} · {s.cashier}
-                {s.voided && <span style={{ fontSize: 10, fontWeight: 700, textTransform: 'uppercase', color: 'var(--red)', border: '1px solid var(--red)', borderRadius: 5, padding: '1px 6px' }}>Voided</span>}
               </span>
-              <span className="pos-mono" style={{ textDecoration: s.voided ? 'line-through' : 'none' }}>{formatMoney(s.total, settings.currency)}</span>
+              <span className="pos-mono">{formatMoney(s.total, settings.currency)}</span>
             </div>
             {expanded === s.id && (
               <div style={{ padding: '4px 16px 14px 37px', fontSize: 12.5, color: 'var(--muted)' }}>
@@ -1377,106 +1397,10 @@ function SalesTab({ sales, settings, voidSale }) {
                   </div>
                 ))}
                 <div style={{ marginTop: 4 }}>Paid via {s.paymentMethod}</div>
-
-                {s.voided && (
-                  <div style={{ marginTop: 6, color: 'var(--red)' }}>
-                    Voided by {s.voidedBy} on {new Date(s.voidedAt).toLocaleString()}{s.voidReason ? ` — "${s.voidReason}"` : ''}
-                  </div>
-                )}
-
-                {!s.voided && voidingId !== s.id && (
-                  <button onClick={(e) => { e.stopPropagation(); setVoidingId(s.id); setVoidReason(''); }} style={{ marginTop: 10, padding: '6px 12px', borderRadius: 7, border: '1px solid var(--red)', background: '#fff', color: 'var(--red)', fontSize: 12, fontWeight: 600 }}>
-                    Void this sale
-                  </button>
-                )}
-
-                {!s.voided && voidingId === s.id && (
-                  <div onClick={(e) => e.stopPropagation()} style={{ marginTop: 10, padding: 10, background: 'var(--red-pale)', borderRadius: 8 }}>
-                    <p style={{ fontSize: 12, color: '#7A1F1F', marginBottom: 6 }}>This puts the items back in stock and marks the sale voided — it can't be undone. Any card/M-Pesa refund still has to be handled separately.</p>
-                    <input value={voidReason} onChange={(e) => setVoidReason(e.target.value)} placeholder="Reason (optional)"
-                      style={{ width: '100%', padding: '7px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 12, marginBottom: 8 }} />
-                    <div style={{ display: 'flex', gap: 8 }}>
-                      <button onClick={() => confirmVoid(s.id)} style={{ padding: '6px 12px', borderRadius: 7, border: 'none', background: 'var(--red)', color: '#fff', fontSize: 12, fontWeight: 600 }}>Confirm void</button>
-                      <button onClick={() => setVoidingId(null)} style={{ padding: '6px 12px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', fontSize: 12 }}>Cancel</button>
-                    </div>
-                  </div>
-                )}
               </div>
             )}
           </div>
         ))}
-      </div>
-    </div>
-  );
-}
-
-function CustomersTab({ customers, sales, settings, saveCustomers }) {
-  const [name, setName] = useState('');
-  const [phone, setPhone] = useState('');
-  const [payingId, setPayingId] = useState(null);
-  const [payAmount, setPayAmount] = useState('');
-
-  const add = () => {
-    if (!name) return;
-    saveCustomers([...customers, { id: genId('c'), name, phone, balance: 0, createdAt: new Date().toISOString() }]);
-    setName(''); setPhone('');
-  };
-
-  const startPay = (c) => { setPayingId(c.id); setPayAmount(''); };
-  const recordPayment = (id) => {
-    const amt = parseFloat(payAmount);
-    if (!amt || amt <= 0) return;
-    saveCustomers(customers.map((c) => (c.id === id ? { ...c, balance: Math.max(0, (c.balance || 0) - amt) } : c)));
-    setPayingId(null);
-  };
-
-  const totalOwed = customers.reduce((sum, c) => sum + (c.balance || 0), 0);
-  const sorted = [...customers].sort((a, b) => (b.balance || 0) - (a.balance || 0));
-
-  return (
-    <div>
-      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Credit accounts</h2>
-      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 16 }}>
-        Total owed across all accounts: <span className="pos-mono" style={{ fontWeight: 600, color: totalOwed > 0 ? 'var(--red)' : 'var(--ink)' }}>{formatMoney(totalOwed, settings.currency)}</span>
-      </p>
-
-      <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 20 }}>
-        {sorted.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)', padding: 16 }}>No customer accounts yet — add one below.</p>}
-        {sorted.map((c) => (
-          <div key={c.id} style={{ padding: '11px 16px', borderBottom: '1px solid var(--border)' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>{c.name}</div>
-                {c.phone && <div style={{ fontSize: 11, color: 'var(--muted)' }}>{c.phone}</div>}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                <span className="pos-mono" style={{ fontSize: 14, fontWeight: 600, color: (c.balance || 0) > 0 ? 'var(--red)' : 'var(--muted)' }}>
-                  {formatMoney(c.balance || 0, settings.currency)} owed
-                </span>
-                {(c.balance || 0) > 0 && (
-                  <button onClick={() => startPay(c)} style={{ fontSize: 12, padding: '6px 12px', borderRadius: 7, border: '1px solid var(--pine)', background: '#fff', color: 'var(--pine)', fontWeight: 600 }}>
-                    Record payment
-                  </button>
-                )}
-              </div>
-            </div>
-            {payingId === c.id && (
-              <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap' }}>
-                <input type="number" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder={`Up to ${formatMoney(c.balance || 0, settings.currency)}`}
-                  style={{ flex: '1 1 140px', padding: '7px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 13 }} />
-                <button onClick={() => recordPayment(c.id)} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 7, padding: '7px 14px', fontSize: 12, fontWeight: 600 }}>Save</button>
-                <button onClick={() => setPayingId(null)} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 7, padding: '7px 14px', fontSize: 12, color: 'var(--muted)' }}>Cancel</button>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10 }}>Add customer account</h3>
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Customer name" style={{ flex: '1 1 140px', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
-        <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (optional)" style={{ flex: '1 1 140px', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
-        <button onClick={add} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 600 }}>Add</button>
       </div>
     </div>
   );
@@ -1488,43 +1412,107 @@ function StaffTab({ staffList, saveStaff }) {
   const [editingId, setEditingId] = useState(null);
   const [editName, setEditName] = useState('');
   const [editPin, setEditPin] = useState('');
+  const [adminPin, setAdminPin] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState('');
 
-  const add = () => {
+  // Every PIN add/change/delete is confirmed server-side against the
+  // admin's own PIN — the browser never stores or reads anyone's real
+  // PIN value, it just relays what was typed to staff-admin and reports
+  // back whether that succeeded.
+  const callStaffAdmin = async (body) => {
+    setActionError('');
+    if (!adminPin || adminPin.length !== 4) {
+      setActionError('Enter your admin PIN above to make staff changes.');
+      return false;
+    }
+    setBusy(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('staff-admin', { body: { adminPin, ...body } });
+      if (error || !data || data.error) {
+        setActionError((data && data.error) || (error && error.message) || 'Could not save. Check your admin PIN and try again.');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      setActionError('Could not reach the server.');
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const add = async () => {
     if (!name || pin.length !== 4) return;
-    saveStaff([...staffList, { id: genId('s'), name, pin, role: 'staff' }]);
+    const id = genId('s');
+    const ok = await callStaffAdmin({ action: 'set', staffId: id, pin, role: 'staff' });
+    if (!ok) return;
+    saveStaff([...staffList, { id, name, role: 'staff', canManageInventory: false }]);
     setName(''); setPin('');
   };
-  const remove = (id) => saveStaff(staffList.filter((s) => s.id !== id));
 
-  const startEdit = (s) => { setEditingId(s.id); setEditName(s.name); setEditPin(s.pin); };
+  const remove = async (id) => {
+    const ok = await callStaffAdmin({ action: 'delete', staffId: id });
+    if (!ok) return;
+    saveStaff(staffList.filter((s) => s.id !== id));
+  };
+
+  const startEdit = (s) => { setEditingId(s.id); setEditName(s.name); setEditPin(''); };
   const cancelEdit = () => setEditingId(null);
-  const saveEdit = (id) => {
-    if (!editName || editPin.length !== 4) return;
-    saveStaff(staffList.map((s) => (s.id === id ? { ...s, name: editName, pin: editPin } : s)));
+  const saveEdit = async (id) => {
+    if (!editName) return;
+    if (editPin && editPin.length !== 4) return; // only validate PIN if actually changing it
+    if (editPin) {
+      const target = staffList.find((s) => s.id === id);
+      const ok = await callStaffAdmin({ action: 'set', staffId: id, pin: editPin, role: target.role });
+      if (!ok) return;
+    }
+    saveStaff(staffList.map((s) => (s.id === id ? { ...s, name: editName } : s)));
     setEditingId(null);
+  };
+
+  const toggleInventoryAccess = (id, checked) => {
+    saveStaff(staffList.map((s) => (s.id === id ? { ...s, canManageInventory: checked } : s)));
   };
 
   return (
     <div>
-      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Staff accounts</h2>
+      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 6 }}>Staff accounts</h2>
+      <div style={{ marginBottom: 14 }}>
+        <label style={{ fontSize: 12, color: 'var(--muted)' }}>Your admin PIN — required to add, edit, or remove a PIN below</label>
+        <input type="password" inputMode="numeric" autoComplete="off" value={adminPin}
+          onChange={(e) => setAdminPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="••••"
+          style={{ width: 140, padding: '8px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginTop: 4, display: 'block' }} />
+      </div>
+      {actionError && <p style={{ color: 'var(--red)', fontSize: 12, marginBottom: 10 }}>{actionError}</p>}
       <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, marginBottom: 20 }}>
         {staffList.map((s) => (
           editingId === s.id ? (
             <div key={s.id} style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid var(--border)' }}>
               <input value={editName} onChange={(e) => setEditName(e.target.value)} placeholder="Full name"
                 style={{ flex: '1 1 140px', padding: '7px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 13 }} />
-              <input value={editPin} onChange={(e) => setEditPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="4-digit PIN"
-                style={{ width: 110, padding: '7px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 13 }} />
-              <button onClick={() => saveEdit(s.id)} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 7, padding: '7px 14px', fontSize: 12, fontWeight: 600 }}>Save</button>
+              <input value={editPin} onChange={(e) => setEditPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="New PIN (optional)"
+                style={{ width: 140, padding: '7px 10px', borderRadius: 7, border: '1px solid var(--border)', fontSize: 13 }} />
+              <button onClick={() => saveEdit(s.id)} disabled={busy} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 7, padding: '7px 14px', fontSize: 12, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>Save</button>
               <button onClick={cancelEdit} style={{ background: 'none', border: '1px solid var(--border)', borderRadius: 7, padding: '7px 14px', fontSize: 12, color: 'var(--muted)' }}>Cancel</button>
             </div>
           ) : (
-            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid var(--border)', fontSize: 13 }}>
+            <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '11px 16px', borderBottom: '1px solid var(--border)', fontSize: 13, flexWrap: 'wrap', gap: 8 }}>
               <span>{s.name} <span style={{ color: 'var(--muted)', fontSize: 11, textTransform: 'uppercase', marginLeft: 6 }}>{s.role}</span></span>
-              <span style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <span style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                {s.role !== 'admin' && (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: 'var(--muted)' }}>
+                    <input
+                      type="checkbox"
+                      checked={!!s.canManageInventory}
+                      onChange={(e) => toggleInventoryAccess(s.id, e.target.checked)}
+                    />
+                    Can add inventory
+                  </label>
+                )}
                 <span className="pos-mono" style={{ color: 'var(--muted)' }}>PIN ••••</span>
                 <button onClick={() => startEdit(s)} title="Change name or PIN" style={{ background: 'none', border: 'none', color: 'var(--muted)' }}><Edit2 size={14} /></button>
-                {s.role !== 'admin' && <button onClick={() => remove(s.id)} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>}
+                {s.role !== 'admin' && <button onClick={() => remove(s.id)} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>}
               </span>
             </div>
           )
@@ -1534,7 +1522,7 @@ function StaffTab({ staffList, saveStaff }) {
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Full name" style={{ flex: '1 1 140px', padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
         <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="4-digit PIN" style={{ width: 120, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
-        <button onClick={add} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 600 }}>Add</button>
+        <button onClick={add} disabled={busy} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>Add</button>
       </div>
     </div>
   );
@@ -1559,11 +1547,6 @@ function SettingsTab({ settings, saveSettings }) {
           <label style={{ fontSize: 12, color: 'var(--muted)' }}>Tax rate (%)</label>
           <input type="number" value={form.taxRate} onChange={(e) => setForm({ ...form, taxRate: parseFloat(e.target.value) || 0 })} style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginTop: 3 }} />
         </div>
-        <div style={{ marginBottom: 16 }}>
-          <label style={{ fontSize: 12, color: 'var(--muted)' }}>Auto-logout after inactivity (minutes)</label>
-          <input type="number" min="0" value={form.sessionTimeoutMinutes} onChange={(e) => setForm({ ...form, sessionTimeoutMinutes: parseFloat(e.target.value) || 0 })} style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginTop: 3 }} />
-          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Signs a cashier or admin out automatically if the terminal sits idle. Set to 0 to disable.</p>
-        </div>
         <button disabled={!dirty} onClick={() => saveSettings(form)} style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: dirty ? 'var(--pine)' : '#B9C4B4', color: '#fff', fontWeight: 600 }}>Save changes</button>
       </div>
     </div>
@@ -1580,8 +1563,8 @@ function App() {
   const [inventory, setInventory] = useState([]);
   const [sales, setSales] = useState([]);
   const [staffList, setStaffList] = useState([]);
+  const [inventoryLog, setInventoryLog] = useState([]);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
-  const [customers, setCustomers] = useState([]);
   const [lastSynced, setLastSynced] = useState('just now');
   const [pendingCount, setPendingCount] = useState(0);
   const pollRef = useRef(null);
@@ -1591,14 +1574,14 @@ function App() {
 
   const loadAll = useCallback(async () => {
     await flushDirtyKeys();
-    const [inv, sls, stf, cfg, cust] = await Promise.all([
+    const [inv, sls, stf, cfg, invLog] = await Promise.all([
       getOrInit('inventory', DEFAULT_INVENTORY),
       getOrInit('sales', []),
       getOrInit('staff', DEFAULT_STAFF),
       getOrInit('settings', DEFAULT_SETTINGS),
-      getOrInit('customers', []),
+      getOrInit('inventoryLog', []),
     ]);
-    setInventory(inv); setSales(sls); setStaffList(stf); setSettings(cfg); setCustomers(cust);
+    setInventory(inv); setSales(sls); setStaffList(stf); setSettings(cfg); setInventoryLog(invLog);
     setLastSynced(new Date().toLocaleTimeString());
     refreshPending();
     setReady(true);
@@ -1655,33 +1638,22 @@ function App() {
     localStorage.removeItem(SESSION_KEY);
   };
 
-  // Auto-logout after inactivity — shared/left-open terminals shouldn't stay
-  // signed in indefinitely under whoever last used them.
-  useEffect(() => {
-    if (!user) return;
-    const minutes = settings.sessionTimeoutMinutes ?? 10;
-    if (!minutes || minutes <= 0) return; // 0 = disabled
-
-    let timer;
-    const reset = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => handleLogout(), minutes * 60 * 1000);
-    };
-    const events = ['mousedown', 'keydown', 'touchstart', 'scroll'];
-    events.forEach((ev) => window.addEventListener(ev, reset));
-    reset();
-
-    return () => {
-      clearTimeout(timer);
-      events.forEach((ev) => window.removeEventListener(ev, reset));
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, settings.sessionTimeoutMinutes]);
-
   const saveInventory = async (next) => {
     setInventory(next);
     await saveShared('inventory', next);
     setLastSynced(new Date().toLocaleTimeString());
+  };
+  const logInventoryChange = async ({ action, productName, sku, detail }) => {
+    const entry = {
+      id: genId('log'),
+      timestamp: new Date().toISOString(),
+      staffId: user?.id,
+      staffName: user?.name || 'Unknown',
+      action, productName, sku, detail,
+    };
+    const next = [...inventoryLog, entry];
+    setInventoryLog(next);
+    await saveShared('inventoryLog', next);
   };
   const saveStaffList = async (next) => {
     setStaffList(next);
@@ -1691,19 +1663,6 @@ function App() {
   const saveSettingsFn = async (next) => {
     setSettings(next);
     await saveShared('settings', next);
-    setLastSynced(new Date().toLocaleTimeString());
-  };
-  const saveCustomers = async (next) => {
-    setCustomers(next);
-    await saveShared('customers', next);
-    setLastSynced(new Date().toLocaleTimeString());
-  };
-  // "Weka kwa akaunti" — adds the sale amount to a customer's running
-  // balance instead of collecting payment now.
-  const chargeToAccount = async (customerId, amount) => {
-    const next = customers.map((c) => (c.id === customerId ? { ...c, balance: (c.balance || 0) + amount } : c));
-    setCustomers(next);
-    await saveShared('customers', next);
     setLastSynced(new Date().toLocaleTimeString());
   };
   const addSale = async (sale) => {
@@ -1720,22 +1679,6 @@ function App() {
     setInventory(next);
     await saveShared('inventory', next);
   };
-  const voidSale = async (saleId, reason) => {
-    const sale = sales.find((s) => s.id === saleId);
-    if (!sale || sale.voided) return;
-    const nextSales = sales.map((s) => (s.id === saleId
-      ? { ...s, voided: true, voidedAt: new Date().toISOString(), voidedBy: user ? user.name : 'admin', voidReason: reason || '' }
-      : s));
-    // Returning the sale puts the items back on the shelf.
-    const nextInventory = inventory.map((p) => {
-      const item = sale.items.find((i) => i.id === p.id);
-      return item ? { ...p, stock: p.stock + item.qty } : p;
-    });
-    setSales(nextSales);
-    setInventory(nextInventory);
-    await Promise.all([saveShared('sales', nextSales), saveShared('inventory', nextInventory)]);
-    setLastSynced(new Date().toLocaleTimeString());
-  };
 
   if (!ready) {
     return (
@@ -1747,20 +1690,22 @@ function App() {
   }
 
   if (!user) {
-    return <LoginScreen staffList={staffList} settings={settings} onLogin={handleLogin} />;
+    return <LoginScreen settings={settings} onLogin={handleLogin} />;
   }
 
   if (user.role === 'admin') {
     return (
-      <AdminConsole inventory={inventory} sales={sales} staffList={staffList} settings={settings} customers={customers}
+      <AdminConsole inventory={inventory} sales={sales} staffList={staffList} settings={settings}
         user={user} onLogout={handleLogout} lastSynced={lastSynced}
-        saveInventory={saveInventory} saveStaff={saveStaffList} saveSettings={saveSettingsFn} voidSale={voidSale} saveCustomers={saveCustomers} />
+        saveInventory={saveInventory} saveStaff={saveStaffList} saveSettings={saveSettingsFn}
+        inventoryLog={inventoryLog} logInventoryChange={logInventoryChange} />
     );
   }
 
   return (
-    <StaffPOS inventory={inventory} sales={sales} settings={settings} user={user} customers={customers}
-      addSale={addSale} updateStock={updateStock} lastSynced={lastSynced} onLogout={handleLogout} chargeToAccount={chargeToAccount} />
+    <StaffPOS inventory={inventory} sales={sales} settings={settings} user={user}
+      addSale={addSale} updateStock={updateStock} lastSynced={lastSynced} onLogout={handleLogout}
+      saveInventory={saveInventory} logInventoryChange={logInventoryChange} />
   );
 }
 
