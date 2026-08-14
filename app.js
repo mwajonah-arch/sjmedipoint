@@ -4,7 +4,7 @@ import {
   ShoppingCart, Plus, Minus, Trash2, Search, LogOut, Package, TrendingUp,
   AlertTriangle, Users, Settings as SettingsIcon, Receipt, CheckCircle, X,
   Pill, Edit2, ChevronRight, Banknote, CreditCard, Smartphone, LayoutDashboard,
-  ClipboardList, Info, Printer
+  ClipboardList, Info, Printer, MessageCircle
 } from 'https://esm.sh/lucide-react@0.383.0?deps=react@18';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -185,6 +185,18 @@ function genId(prefix) {
 
 function formatMoney(amount, currency) {
   return currency + ' ' + Number(amount).toFixed(2).replace(/\d(?=(\d{3})+\.)/g, '$&,');
+}
+
+// Normalizes a locally-formatted Kenyan number (07XX XXX XXX, +254..., etc.)
+// into the plain digits-with-country-code format wa.me requires. Returns
+// null if there's nothing usable to build a link from.
+function toWhatsappDigits(phone) {
+  if (!phone) return null;
+  let digits = String(phone).replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.startsWith('0')) digits = '254' + digits.slice(1);
+  else if (digits.length === 9) digits = '254' + digits; // e.g. "7XX XXX XXX" with no leading 0
+  return digits;
 }
 
 function isSameDay(iso, ref) {
@@ -1580,8 +1592,35 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [query, setQuery] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [sort, setSort] = useState({ key: null, dir: 'asc' });
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [bulkModalOpen, setBulkModalOpen] = useState(false);
 
   const filtered = inventory.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || p.sku.toLowerCase().includes(query.toLowerCase()));
+
+  const sorted = useMemo(() => {
+    if (!sort.key) return filtered;
+    const dir = sort.dir === 'asc' ? 1 : -1;
+    return [...filtered].sort((a, b) => {
+      let av, bv;
+      if (sort.key === 'expiry') {
+        av = a.expiry ? new Date(a.expiry).getTime() : Infinity;
+        bv = b.expiry ? new Date(b.expiry).getTime() : Infinity;
+      } else if (sort.key === 'price' || sort.key === 'stock') {
+        av = Number(a[sort.key]); bv = Number(b[sort.key]);
+      } else {
+        av = String(a[sort.key] || '').toLowerCase();
+        bv = String(b[sort.key] || '').toLowerCase();
+      }
+      if (av < bv) return -1 * dir;
+      if (av > bv) return 1 * dir;
+      return 0;
+    });
+  }, [filtered, sort]);
+
+  const toggleSort = (key) => {
+    setSort((s) => (s.key === key ? { key, dir: s.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: 'asc' }));
+  };
 
   const upsert = (product) => {
     if (product.id) {
@@ -1621,7 +1660,56 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
         detail: `Removed (had ${product.stock} in stock)`,
       });
     }
+    setSelectedIds((s) => { const next = new Set(s); next.delete(id); return next; });
   };
+
+  const toggleSelected = (id) => {
+    setSelectedIds((s) => {
+      const next = new Set(s);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const allVisibleSelected = sorted.length > 0 && sorted.every((p) => selectedIds.has(p.id));
+  const toggleSelectAll = () => {
+    setSelectedIds((s) => {
+      if (allVisibleSelected) {
+        const next = new Set(s);
+        sorted.forEach((p) => next.delete(p.id));
+        return next;
+      }
+      const next = new Set(s);
+      sorted.forEach((p) => next.add(p.id));
+      return next;
+    });
+  };
+
+  const applyBulkEdit = (updatedProducts, detailLabel) => {
+    const byId = new Map(updatedProducts.map((p) => [p.id, p]));
+    saveInventory(inventory.map((p) => (byId.has(p.id) ? byId.get(p.id) : p)));
+    if (logInventoryChange) {
+      logInventoryChange({
+        action: 'bulk',
+        productName: `${updatedProducts.length} product${updatedProducts.length !== 1 ? 's' : ''}`,
+        sku: '',
+        detail: detailLabel,
+      });
+    }
+    setSelectedIds(new Set());
+    setBulkModalOpen(false);
+  };
+
+  const SortHeader = ({ label, sortKey }) => (
+    <button onClick={() => toggleSort(sortKey)} style={{
+      background: 'none', border: 'none', padding: 0, display: 'flex', alignItems: 'center', gap: 3,
+      fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5,
+      color: sort.key === sortKey ? 'var(--ink)' : 'var(--muted)', fontWeight: sort.key === sortKey ? 700 : 400
+    }}>
+      {label}
+      {sort.key === sortKey && <span style={{ fontSize: 10 }}>{sort.dir === 'asc' ? '▲' : '▼'}</span>}
+    </button>
+  );
 
   return (
     <div>
@@ -1631,19 +1719,40 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
           <Plus size={14} /> Add product
         </button>
       </div>
-      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search inventory"
-        style={{ width: '100%', maxWidth: 320, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginBottom: 14 }} />
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 }}>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search inventory"
+          style={{ flex: '1 1 240px', maxWidth: 320, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+        {selectedIds.size > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, background: 'var(--pine-pale)', border: '1px solid var(--pine)', borderRadius: 8, padding: '7px 12px' }}>
+            <span style={{ fontSize: 12.5, color: 'var(--pine)', fontWeight: 600 }}>{selectedIds.size} selected</span>
+            <button onClick={() => setBulkModalOpen(true)} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 6, padding: '5px 10px', fontSize: 12, fontWeight: 600 }}>
+              Bulk edit
+            </button>
+            <button onClick={() => setSelectedIds(new Set())} style={{ background: 'none', border: 'none', color: 'var(--pine)', fontSize: 12, textDecoration: 'underline' }}>
+              Clear
+            </button>
+          </div>
+        )}
+      </div>
 
       <div className="pos-table-scroll" style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12 }}>
-        <div style={{ minWidth: 640 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 84px', padding: '10px 16px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-            <span>Product</span><span>Category</span><span>SKU</span><span>Price</span><span>Stock</span><span>Expiry</span><span></span>
+        <div style={{ minWidth: 680 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '30px 2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 84px', padding: '10px 16px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+            <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} />
+            <SortHeader label="Product" sortKey="name" />
+            <SortHeader label="Category" sortKey="category" />
+            <SortHeader label="SKU" sortKey="sku" />
+            <SortHeader label="Price" sortKey="price" />
+            <SortHeader label="Stock" sortKey="stock" />
+            <SortHeader label="Expiry" sortKey="expiry" />
+            <span></span>
           </div>
-          {filtered.map((p) => {
+          {sorted.map((p) => {
             const expDays = daysUntilExpiry(p.expiry);
             const expiringSoon = expDays !== null && expDays <= EXPIRY_WINDOW_DAYS;
             return (
-            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 84px', padding: '10px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '30px 2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 84px', padding: '10px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center', background: selectedIds.has(p.id) ? 'var(--pine-pale)' : 'transparent' }}>
+              <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelected(p.id)} />
               <span>{p.name}{p.requiresRx ? ' ℞' : ''}</span>
               <span style={{ color: 'var(--muted)' }}>{p.category}</span>
               <span className="pos-mono" style={{ fontSize: 12 }}>{p.sku}</span>
@@ -1663,6 +1772,15 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
 
       {modalProduct && <ProductModal product={modalProduct} onClose={() => setModalProduct(null)} onSave={upsert} />}
       {drugInfoProduct && <DrugInfoModal product={drugInfoProduct} onClose={() => setDrugInfoProduct(null)} />}
+      {bulkModalOpen && (
+        <BulkEditModal
+          products={inventory.filter((p) => selectedIds.has(p.id))}
+          categories={Array.from(new Set(inventory.map((p) => p.category))).filter(Boolean)}
+          settings={settings}
+          onApply={applyBulkEdit}
+          onClose={() => setBulkModalOpen(false)}
+        />
+      )}
       {confirmDeleteId && (() => {
         const p = inventory.find((x) => x.id === confirmDeleteId);
         if (!p) return null;
@@ -1675,6 +1793,99 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
           />
         );
       })()}
+    </div>
+  );
+}
+
+// Applies a price change or category assignment to every selected product
+// at once. Two independent sections — a cashier/admin can use either (or
+// both, one after another) without leaving the dialog.
+function BulkEditModal({ products, categories, settings, onApply, onClose }) {
+  const [priceMode, setPriceMode] = useState('percent'); // percent | amount | set
+  const [priceSign, setPriceSign] = useState('increase'); // increase | decrease
+  const [priceValue, setPriceValue] = useState('');
+  const [newCategory, setNewCategory] = useState('');
+
+  const priceValNum = parseFloat(priceValue);
+  const priceValid = !isNaN(priceValNum) && priceValNum >= 0;
+
+  const applyPrice = () => {
+    if (!priceValid) return;
+    const updated = products.map((p) => {
+      let price = p.price;
+      if (priceMode === 'set') price = priceValNum;
+      else if (priceMode === 'amount') price = priceSign === 'increase' ? p.price + priceValNum : p.price - priceValNum;
+      else price = priceSign === 'increase' ? p.price * (1 + priceValNum / 100) : p.price * (1 - priceValNum / 100);
+      return { ...p, price: Math.max(0, Math.round(price * 100) / 100) };
+    });
+    const label = priceMode === 'set'
+      ? `Price set to ${formatMoney(priceValNum, settings.currency)}`
+      : `Price ${priceSign === 'increase' ? 'increased' : 'decreased'} by ${priceMode === 'percent' ? priceValNum + '%' : formatMoney(priceValNum, settings.currency)}`;
+    onApply(updated, label);
+  };
+
+  const applyCategory = () => {
+    if (!newCategory.trim()) return;
+    const updated = products.map((p) => ({ ...p, category: newCategory.trim() }));
+    onApply(updated, `Category set to "${newCategory.trim()}"`);
+  };
+
+  return (
+    <div className="pos-modal-backdrop">
+      <div style={{ width: 420, maxWidth: '100%', background: '#fff', borderRadius: 14, padding: 24, maxHeight: '85vh', overflowY: 'auto' }} className="pos-scroll">
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+          <span className="pos-serif" style={{ fontSize: 17, fontWeight: 700 }}>Bulk edit</span>
+          <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
+        </div>
+        <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 18 }}>
+          Applies to {products.length} selected product{products.length !== 1 ? 's' : ''}: {products.slice(0, 4).map((p) => p.name).join(', ')}{products.length > 4 ? `, +${products.length - 4} more` : ''}.
+        </p>
+
+        <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14, marginBottom: 16 }}>
+          <div className="pos-serif" style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Adjust price</div>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 10, flexWrap: 'wrap' }}>
+            {[{ k: 'percent', label: 'By %' }, { k: 'amount', label: `By ${settings.currency}` }, { k: 'set', label: 'Set exact' }].map((m) => (
+              <button key={m.k} onClick={() => setPriceMode(m.k)} style={{
+                padding: '6px 10px', borderRadius: 7, fontSize: 12, fontWeight: 600,
+                border: priceMode === m.k ? '1px solid var(--pine)' : '1px solid var(--border)',
+                background: priceMode === m.k ? 'var(--pine-pale)' : '#fff', color: priceMode === m.k ? 'var(--pine)' : 'var(--ink)'
+              }}>{m.label}</button>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            {priceMode !== 'set' && (
+              <select value={priceSign} onChange={(e) => setPriceSign(e.target.value)} style={{ padding: '9px 8px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }}>
+                <option value="increase">Increase</option>
+                <option value="decrease">Decrease</option>
+              </select>
+            )}
+            <input type="number" min="0" value={priceValue} onChange={(e) => setPriceValue(e.target.value)}
+              placeholder={priceMode === 'percent' ? 'e.g. 10' : priceMode === 'set' ? 'New price' : 'Amount'}
+              style={{ flex: 1, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+            <button onClick={applyPrice} disabled={!priceValid} style={{
+              padding: '9px 14px', borderRadius: 8, border: 'none', fontSize: 13, fontWeight: 600,
+              background: priceValid ? 'var(--pine)' : '#B9C4B4', color: '#fff'
+            }}>Apply</button>
+          </div>
+        </div>
+
+        <div style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 14 }}>
+          <div className="pos-serif" style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Set category</div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input list="pos-bulk-category-list" value={newCategory} onChange={(e) => setNewCategory(e.target.value)}
+              placeholder="Category name"
+              style={{ flex: 1, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+            <datalist id="pos-bulk-category-list">
+              {categories.map((c) => <option key={c} value={c} />)}
+            </datalist>
+            <button onClick={applyCategory} disabled={!newCategory.trim()} style={{
+              padding: '9px 14px', borderRadius: 8, border: 'none', fontSize: 13, fontWeight: 600,
+              background: newCategory.trim() ? 'var(--pine)' : '#B9C4B4', color: '#fff'
+            }}>Apply</button>
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Type an existing category or a new one — it'll be created if it doesn't exist yet.</p>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1717,6 +1928,7 @@ const ACTIVITY_ACTION_META = {
   add: { label: 'Added', color: 'var(--pine)', bg: 'var(--pine-pale)' },
   edit: { label: 'Edited', color: 'var(--amber)', bg: 'var(--amber-pale)' },
   delete: { label: 'Deleted', color: 'var(--red)', bg: 'var(--red-pale)' },
+  bulk: { label: 'Bulk edit', color: 'var(--pine)', bg: 'var(--pine-pale)' },
 };
 
 function ActivityTab({ inventoryLog }) {
@@ -1872,6 +2084,7 @@ function SalesTab({ sales, settings, voidSale }) {
 function AccountsTab({ sales, settings, settleAccountSale }) {
   const [settleMethod, setSettleMethod] = useState({});
   const [busyId, setBusyId] = useState(null);
+  const [query, setQuery] = useState('');
 
   const accountSales = sales.filter((s) => s.paymentMethod === 'account' && !s.voided);
   const outstanding = accountSales.filter((s) => !s.settled).sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
@@ -1884,7 +2097,8 @@ function AccountsTab({ sales, settings, settleAccountSale }) {
     byCustomer[key].sales.push(s);
     byCustomer[key].total += s.total;
   });
-  const customers = Object.values(byCustomer).sort((a, b) => b.total - a.total);
+  const allCustomers = Object.values(byCustomer).sort((a, b) => b.total - a.total);
+  const customers = allCustomers.filter((c) => c.name.toLowerCase().includes(query.toLowerCase()));
   const totalOutstanding = outstanding.reduce((sum, s) => sum + s.total, 0);
 
   const markPaid = async (id) => {
@@ -1903,16 +2117,41 @@ function AccountsTab({ sales, settings, settleAccountSale }) {
         <StatCard label="Total outstanding" value={formatMoney(totalOutstanding, settings.currency)} accent={totalOutstanding ? 'var(--red)' : undefined} />
       </div>
 
-      {customers.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No outstanding balances right now.</p>}
+      {allCustomers.length > 0 && (
+        <div style={{ position: 'relative', maxWidth: 320, marginBottom: 16 }}>
+          <Search size={15} style={{ position: 'absolute', left: 11, top: 10, color: 'var(--muted)' }} />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search by customer name"
+            style={{ width: '100%', padding: '9px 12px 9px 32px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+        </div>
+      )}
 
-      {customers.map((c) => (
+      {allCustomers.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No outstanding balances right now.</p>}
+      {allCustomers.length > 0 && customers.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No customers match "{query}".</p>}
+
+      {customers.map((c) => {
+        const waDigits = toWhatsappDigits(c.phone);
+        const waMessage = `Hi ${c.name}, this is a friendly reminder from ${settings.pharmacyName} that you have an outstanding balance of ${formatMoney(c.total, settings.currency)}. Kindly settle at your earliest convenience — thank you!`;
+        const waLink = waDigits ? `https://wa.me/${waDigits}?text=${encodeURIComponent(waMessage)}` : null;
+        return (
         <div key={c.name} style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 6 }}>
             <div>
               <div style={{ fontWeight: 600, fontSize: 14 }}>{c.name}</div>
               {c.phone && <div style={{ fontSize: 12, color: 'var(--muted)' }}>{c.phone}</div>}
             </div>
-            <div className="pos-mono" style={{ fontWeight: 700, fontSize: 15, color: 'var(--red)' }}>{formatMoney(c.total, settings.currency)}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <div className="pos-mono" style={{ fontWeight: 700, fontSize: 15, color: 'var(--red)' }}>{formatMoney(c.total, settings.currency)}</div>
+              {waLink ? (
+                <a href={waLink} target="_blank" rel="noopener noreferrer" title="Send a WhatsApp payment reminder" style={{
+                  display: 'flex', alignItems: 'center', gap: 5, padding: '6px 10px', borderRadius: 7,
+                  border: '1px solid #25D366', color: '#128C4A', background: '#E9F9EF', fontSize: 11.5, fontWeight: 600, textDecoration: 'none'
+                }}>
+                  <MessageCircle size={13} /> Remind
+                </a>
+              ) : (
+                <span title="No phone number on file for this customer" style={{ fontSize: 11, color: 'var(--muted)' }}>No phone on file</span>
+              )}
+            </div>
           </div>
           {c.sales.map((s) => (
             <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12.5, padding: '8px 0', borderTop: '1px solid var(--border)', flexWrap: 'wrap', gap: 8 }}>
@@ -1936,7 +2175,8 @@ function AccountsTab({ sales, settings, settleAccountSale }) {
             </div>
           ))}
         </div>
-      ))}
+        );
+      })}
 
       {settledRecently.length > 0 && (
         <>
