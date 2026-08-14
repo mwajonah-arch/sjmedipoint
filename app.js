@@ -4,7 +4,7 @@ import {
   ShoppingCart, Plus, Minus, Trash2, Search, LogOut, Package, TrendingUp,
   AlertTriangle, Users, Settings as SettingsIcon, Receipt, CheckCircle, X,
   Pill, Edit2, ChevronRight, Banknote, CreditCard, Smartphone, LayoutDashboard,
-  ClipboardList, Info, Printer, MessageCircle, Camera
+  ClipboardList, Info, Printer, MessageCircle, Camera, MoreHorizontal
 } from 'https://esm.sh/lucide-react@0.383.0?deps=react@18';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -695,6 +695,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
   const [inventoryOpen, setInventoryOpen] = useState(false);
   const [accountsOpen, setAccountsOpen] = useState(false);
   const [scannerOpen, setScannerOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
   const [scanNotice, setScanNotice] = useState('');
   const [flashId, setFlashId] = useState(null);
   const flashTimer = useRef(null);
@@ -825,32 +826,80 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       <style>{buildStyles(settings.theme)}</style>
       <TopBar settings={settings} user={user} onLogout={onLogout} lastSynced={lastSynced}
         right={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button onClick={() => setSummaryOpen(true)} title="Today's sales summary" style={{
-              display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
-              border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
-            }}>
-              <TrendingUp size={14} />
-              <span className="pos-mono" style={{ fontWeight: 600 }}>{formatMoney(myTodayRevenue, settings.currency)}</span>
-              <span className="pos-topbar-action-label" style={{ opacity: 0.75 }}>today</span>
-            </button>
-            <button onClick={() => setAccountsOpen(true)} title="Accounts" style={{
-              display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
-              border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
-            }}>
-              <CreditCard size={14} />
-              <span className="pos-topbar-action-label">Accounts</span>
-            </button>
-            {user.canManageInventory && (
-              <button onClick={() => setInventoryOpen(true)} title="Manage inventory" style={{
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="pos-topbar-actions-full" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button onClick={() => setSummaryOpen(true)} title="Today's sales summary" style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
                 border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
               }}>
-                <Package size={14} />
-                <span className="pos-topbar-action-label">Inventory</span>
+                <TrendingUp size={14} />
+                <span className="pos-mono" style={{ fontWeight: 600 }}>{formatMoney(myTodayRevenue, settings.currency)}</span>
+                <span className="pos-topbar-action-label" style={{ opacity: 0.75 }}>today</span>
               </button>
-            )}
-            <div style={{ fontSize: 12, opacity: 0.85, marginLeft: 4 }}>{cart.length} item{cart.length !== 1 ? 's' : ''} in cart</div>
+              <button onClick={() => setAccountsOpen(true)} title="Accounts" style={{
+                display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
+                border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
+              }}>
+                <CreditCard size={14} />
+                <span className="pos-topbar-action-label">Accounts</span>
+              </button>
+              {user.canManageInventory && (
+                <button onClick={() => setInventoryOpen(true)} title="Manage inventory" style={{
+                  display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
+                  border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
+                }}>
+                  <Package size={14} />
+                  <span className="pos-topbar-action-label">Inventory</span>
+                </button>
+              )}
+            </div>
+
+            {/* Small screens: same three actions tucked behind one button */}
+            <div className="pos-topbar-actions-more" style={{ position: 'relative' }}>
+              <button onClick={() => setMoreOpen((o) => !o)} title="More actions" style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32,
+                borderRadius: 8, border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff'
+              }}>
+                <MoreHorizontal size={17} />
+              </button>
+              {moreOpen && (
+                <React.Fragment>
+                  <div onClick={() => setMoreOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+                  <div style={{
+                    position: 'absolute', top: '120%', right: 0, background: '#fff', borderRadius: 10,
+                    border: '1px solid var(--border)', boxShadow: '0 10px 28px rgba(0,0,0,0.2)',
+                    minWidth: 190, zIndex: 61, overflow: 'hidden'
+                  }}>
+                    <button onClick={() => { setSummaryOpen(true); setMoreOpen(false); }} style={{
+                      display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '11px 14px',
+                      border: 'none', borderBottom: '1px solid var(--border)', background: '#fff', color: 'var(--ink)',
+                      fontSize: 13, textAlign: 'left'
+                    }}>
+                      <TrendingUp size={15} color="var(--pine)" />
+                      <span style={{ flex: 1 }}>Today's sales</span>
+                      <span className="pos-mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{formatMoney(myTodayRevenue, settings.currency)}</span>
+                    </button>
+                    <button onClick={() => { setAccountsOpen(true); setMoreOpen(false); }} style={{
+                      display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '11px 14px',
+                      border: 'none', borderBottom: user.canManageInventory ? '1px solid var(--border)' : 'none',
+                      background: '#fff', color: 'var(--ink)', fontSize: 13, textAlign: 'left'
+                    }}>
+                      <CreditCard size={15} color="var(--pine)" /> Accounts
+                    </button>
+                    {user.canManageInventory && (
+                      <button onClick={() => { setInventoryOpen(true); setMoreOpen(false); }} style={{
+                        display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '11px 14px',
+                        border: 'none', background: '#fff', color: 'var(--ink)', fontSize: 13, textAlign: 'left'
+                      }}>
+                        <Package size={15} color="var(--pine)" /> Manage inventory
+                      </button>
+                    )}
+                  </div>
+                </React.Fragment>
+              )}
+            </div>
+
+            <div style={{ fontSize: 12, opacity: 0.85 }}>{cart.length} item{cart.length !== 1 ? 's' : ''} in cart</div>
           </div>
         } />
 
