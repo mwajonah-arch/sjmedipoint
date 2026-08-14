@@ -1039,6 +1039,21 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
           <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
         </div>
 
+        <div className="pos-scroll" style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10, marginBottom: 14 }}>
+          {cart.map((i, idx) => (
+            <div key={i.id} style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+              padding: '8px 12px', fontSize: 12.5, borderBottom: idx < cart.length - 1 ? '1px solid var(--border)' : 'none'
+            }}>
+              <span style={{ flex: 1 }}>
+                {i.name}{i.requiresRx ? ' ℞' : ''}
+                <span className="pos-mono" style={{ color: 'var(--muted)', marginLeft: 6 }}>×{i.qty}</span>
+              </span>
+              <span className="pos-mono" style={{ whiteSpace: 'nowrap' }}>{formatMoney(i.price * i.qty, settings.currency)}</span>
+            </div>
+          ))}
+        </div>
+
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 20, fontWeight: 700, marginBottom: 16 }}>
           <span className="pos-serif">Total due</span>
           <span className="pos-mono">{formatMoney(total, settings.currency)}</span>
@@ -1394,10 +1409,32 @@ function summarizeProductChange(before, after, settings) {
   return parts.length ? parts.join(', ') : 'No field changes';
 }
 
+// Small reusable "are you sure?" dialog for destructive actions (deleting a
+// product, removing a staff member, etc.) — mirrors the confirm-and-reason
+// pattern already used for voiding a sale, just without the reason field.
+function ConfirmModal({ title, message, confirmLabel = 'Delete', onConfirm, onCancel, busy, error }) {
+  return (
+    <div className="pos-modal-backdrop">
+      <div style={{ width: 340, maxWidth: '100%', background: '#fff', borderRadius: 14, padding: 22 }}>
+        <div className="pos-serif" style={{ fontSize: 16, fontWeight: 700, marginBottom: 8 }}>{title}</div>
+        <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: error ? 10 : 18, lineHeight: 1.4 }}>{message}</p>
+        {error && <p style={{ fontSize: 12, color: 'var(--red)', marginBottom: 16 }}>{error}</p>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onCancel} disabled={busy} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: '1px solid var(--border)', background: '#fff', fontSize: 13, fontWeight: 600, color: 'var(--ink)' }}>Cancel</button>
+          <button onClick={onConfirm} disabled={busy} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: 'none', background: 'var(--red)', color: '#fff', fontSize: 13, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>
+            {busy ? 'Removing…' : confirmLabel}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function InventoryTab({ inventory, settings, saveInventory, user, logInventoryChange }) {
   const [modalProduct, setModalProduct] = useState(null); // null = closed, {} = new, obj = edit
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [query, setQuery] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   const filtered = inventory.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || p.sku.toLowerCase().includes(query.toLowerCase()));
 
@@ -1471,7 +1508,7 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
               <span style={{ display: 'flex', gap: 6 }}>
                 <button onClick={() => setDrugInfoProduct(p)} title="AI dosage / side effects / interactions lookup" style={{ background: 'none', border: 'none', color: 'var(--pine)' }}><Info size={14} /></button>
                 <button onClick={() => setModalProduct(p)} style={{ background: 'none', border: 'none', color: 'var(--muted)' }}><Edit2 size={14} /></button>
-                <button onClick={() => remove(p.id)} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>
+                <button onClick={() => setConfirmDeleteId(p.id)} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>
               </span>
             </div>
             );
@@ -1481,6 +1518,18 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
 
       {modalProduct && <ProductModal product={modalProduct} onClose={() => setModalProduct(null)} onSave={upsert} />}
       {drugInfoProduct && <DrugInfoModal product={drugInfoProduct} onClose={() => setDrugInfoProduct(null)} />}
+      {confirmDeleteId && (() => {
+        const p = inventory.find((x) => x.id === confirmDeleteId);
+        if (!p) return null;
+        return (
+          <ConfirmModal
+            title="Delete this product?"
+            message={`"${p.name}" (${p.sku}) will be removed from inventory${p.stock > 0 ? `, along with the ${p.stock} units currently on record` : ''}. This can't be undone.`}
+            onCancel={() => setConfirmDeleteId(null)}
+            onConfirm={() => { remove(p.id); setConfirmDeleteId(null); }}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -1770,6 +1819,7 @@ function StaffTab({ staffList, saveStaff }) {
   const [adminPin, setAdminPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
   // Every PIN add/change/delete is confirmed server-side against the
   // admin's own PIN — the browser never stores or reads anyone's real
@@ -1810,6 +1860,7 @@ function StaffTab({ staffList, saveStaff }) {
     const ok = await callStaffAdmin({ action: 'delete', staffId: id });
     if (!ok) return;
     saveStaff(staffList.filter((s) => s.id !== id));
+    setConfirmDeleteId(null);
   };
 
   const startEdit = (s) => { setEditingId(s.id); setEditName(s.name); setEditPin(''); };
@@ -1867,7 +1918,7 @@ function StaffTab({ staffList, saveStaff }) {
                 )}
                 <span className="pos-mono" style={{ color: 'var(--muted)' }}>PIN ••••</span>
                 <button onClick={() => startEdit(s)} title="Change name or PIN" style={{ background: 'none', border: 'none', color: 'var(--muted)' }}><Edit2 size={14} /></button>
-                {s.role !== 'admin' && <button onClick={() => remove(s.id)} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>}
+                {s.role !== 'admin' && <button onClick={() => setConfirmDeleteId(s.id)} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>}
               </span>
             </div>
           )
@@ -1879,6 +1930,21 @@ function StaffTab({ staffList, saveStaff }) {
         <input value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))} placeholder="4-digit PIN" style={{ width: 120, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
         <button onClick={add} disabled={busy} style={{ background: 'var(--pine)', color: '#fff', border: 'none', borderRadius: 8, padding: '9px 16px', fontSize: 13, fontWeight: 600, opacity: busy ? 0.6 : 1 }}>Add</button>
       </div>
+      {confirmDeleteId && (() => {
+        const s = staffList.find((x) => x.id === confirmDeleteId);
+        if (!s) return null;
+        return (
+          <ConfirmModal
+            title="Remove this staff account?"
+            message={`"${s.name}" will lose access immediately and won't be able to log in again. This can't be undone.`}
+            confirmLabel="Remove"
+            busy={busy}
+            error={actionError}
+            onCancel={() => setConfirmDeleteId(null)}
+            onConfirm={() => remove(s.id)}
+          />
+        );
+      })()}
     </div>
   );
 }
