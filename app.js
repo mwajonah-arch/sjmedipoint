@@ -4,7 +4,7 @@ import {
   ShoppingCart, Plus, Minus, Trash2, Search, LogOut, Package, TrendingUp,
   AlertTriangle, Users, Settings as SettingsIcon, Receipt, CheckCircle, X,
   Pill, Edit2, ChevronRight, Banknote, CreditCard, Smartphone, LayoutDashboard,
-  ClipboardList, Info, Printer, MessageCircle
+  ClipboardList, Info, Printer, MessageCircle, Camera
 } from 'https://esm.sh/lucide-react@0.383.0?deps=react@18';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -234,6 +234,127 @@ function exportSalesCsv(salesList, settings) {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+/* ---------------------------------------------------------------------- */
+/* Barcode scanning                                                       */
+/* ---------------------------------------------------------------------- */
+
+// Cheap USB/Bluetooth barcode scanners work as "keyboard wedges" — they
+// simply type each digit of the barcode very fast (usually well under
+// 30ms between characters) and finish with an Enter. A human typing never
+// gets close to that speed, so buffering keystrokes and resetting the
+// buffer whenever the gap between two keys is too large reliably tells a
+// scanner burst apart from normal typing, with no dedicated input focus
+// required — this listens globally so a scan works whether or not the
+// search box happens to be focused. Only exact SKU matches turn into an
+// action, so an accidental fast typist just gets ignored, not disrupted.
+function useBarcodeScanner(onScan, enabled) {
+  useEffect(() => {
+    if (!enabled) return undefined;
+    let buffer = '';
+    let lastTime = 0;
+    const SCAN_GAP_MS = 60;
+    const MIN_LENGTH = 4;
+
+    const handler = (e) => {
+      const now = Date.now();
+      if (now - lastTime > SCAN_GAP_MS) buffer = '';
+      lastTime = now;
+
+      if (e.key === 'Enter') {
+        if (buffer.length >= MIN_LENGTH) onScan(buffer);
+        buffer = '';
+        return;
+      }
+      if (e.key.length === 1) {
+        buffer += e.key;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [onScan, enabled]);
+}
+
+// Camera-based scanning using the browser's native Shape Detection API
+// (window.BarcodeDetector) — no extra library needed. Support is currently
+// Chromium/Android-only, so this degrades to a clear "use a hardware
+// scanner instead" message everywhere else rather than failing silently.
+function BarcodeScannerModal({ onDetect, onClose }) {
+  const videoRef = useRef(null);
+  const [error, setError] = useState('');
+  const [supported] = useState(() => typeof window !== 'undefined' && 'BarcodeDetector' in window);
+
+  useEffect(() => {
+    if (!supported) return undefined;
+    let stream;
+    let rafId;
+    let cancelled = false;
+    let detector;
+
+    (async () => {
+      try {
+        detector = new window.BarcodeDetector({
+          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'],
+        });
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+
+        const tick = async () => {
+          if (cancelled) return;
+          try {
+            const codes = await detector.detect(videoRef.current);
+            if (codes.length > 0) {
+              onDetect(codes[0].rawValue);
+              return;
+            }
+          } catch (err) {
+            // Transient per-frame decode errors are normal — keep scanning.
+          }
+          rafId = requestAnimationFrame(tick);
+        };
+        rafId = requestAnimationFrame(tick);
+      } catch (err) {
+        setError('Camera access was denied or is unavailable on this device.');
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (rafId) cancelAnimationFrame(rafId);
+      if (stream) stream.getTracks().forEach((t) => t.stop());
+    };
+  }, [supported, onDetect]);
+
+  return (
+    <div className="pos-modal-backdrop" onClick={onClose}>
+      <div className="pos-modal" onClick={(e) => e.stopPropagation()} style={{ background: 'var(--paper)', borderRadius: 14, padding: 20 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+          <span className="pos-serif" style={{ fontSize: 16, fontWeight: 700 }}>Scan barcode</span>
+          <button className="pos-icon-btn" onClick={onClose} title="Close" style={{ color: 'var(--muted)' }}><X size={18} /></button>
+        </div>
+
+        {!supported && (
+          <EmptyState icon={Camera} title="Camera scanning isn't supported in this browser"
+            subtitle="A USB or Bluetooth barcode scanner will still work automatically, anywhere in the app — just point and click to fire the trigger." />
+        )}
+        {supported && error && (
+          <EmptyState icon={AlertTriangle} title="Couldn't access the camera" subtitle={error} />
+        )}
+        {supported && !error && (
+          <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#000' }}>
+            <video ref={videoRef} muted playsInline style={{ width: '100%', display: 'block' }} />
+            <div style={{ position: 'absolute', inset: '32% 8%', border: '2px solid var(--pine-light)', borderRadius: 8, pointerEvents: 'none' }} />
+          </div>
+        )}
+        {supported && !error && (
+          <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, textAlign: 'center' }}>Line the barcode up inside the frame.</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 /* ---------------------------------------------------------------------- */
@@ -562,7 +683,7 @@ function EmptyState({ icon: Icon, title, subtitle, compact }) {
 /* Staff / Cashier POS                                                     */
 /* ---------------------------------------------------------------------- */
 
-function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, lastSynced, onLogout, saveInventory, logInventoryChange, voidSale }) {
+function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, lastSynced, onLogout, saveInventory, logInventoryChange, voidSale, settleAccountSale }) {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [cart, setCart] = useState([]);
@@ -572,8 +693,12 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [inventoryOpen, setInventoryOpen] = useState(false);
+  const [accountsOpen, setAccountsOpen] = useState(false);
+  const [scannerOpen, setScannerOpen] = useState(false);
+  const [scanNotice, setScanNotice] = useState('');
   const [flashId, setFlashId] = useState(null);
   const flashTimer = useRef(null);
+  const scanNoticeTimer = useRef(null);
 
   const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()) && !s.voided);
   const myTodayRevenue = myTodaySales.reduce((sum, s) => sum + s.total, 0);
@@ -608,6 +733,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
   const showFrequentRow = frequentProducts.length >= 3 && query === '' && category === 'All';
 
   useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
+  useEffect(() => () => { if (scanNoticeTimer.current) clearTimeout(scanNoticeTimer.current); }, []);
 
   const addToCart = (product) => {
     if (product.stock <= 0) return;
@@ -625,6 +751,34 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
     if (flashTimer.current) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => setFlashId(null), 600);
   };
+
+  // Shared by both scan paths (hardware keyboard-wedge and camera). A hit
+  // goes straight into the cart with the same flash confirmation as a tap;
+  // a miss drops the code into the search box so staff can find it by eye
+  // instead — a mistyped or unlisted barcode shouldn't be a dead end.
+  const handleBarcodeScan = useCallback((rawCode) => {
+    const code = rawCode.trim();
+    if (!code) return;
+    const product = inventory.find((p) => p.sku && p.sku.toLowerCase() === code.toLowerCase());
+    setScannerOpen(false);
+    if (product) {
+      if (product.stock <= 0) {
+        setScanNotice(`"${product.name}" is out of stock.`);
+      } else {
+        addToCart(product);
+        setQuery('');
+        setScanNotice('');
+      }
+    } else {
+      setQuery(code);
+      setScanNotice(`No product matches barcode "${code}".`);
+    }
+    if (scanNoticeTimer.current) clearTimeout(scanNoticeTimer.current);
+    scanNoticeTimer.current = setTimeout(() => setScanNotice(''), 4000);
+  }, [inventory]);
+
+  const scannerListening = !checkoutOpen && !summaryOpen && !inventoryOpen && !accountsOpen && !drugInfoProduct && !scannerOpen;
+  useBarcodeScanner(handleBarcodeScan, scannerListening);
 
   const changeQty = (id, delta) => {
     setCart((c) => c.map((i) => {
@@ -687,6 +841,13 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
             <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
+            <button onClick={() => setScannerOpen(true)} title="Scan a barcode with the camera — or just fire a USB/Bluetooth scanner any time" style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
+              border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
+            }}>
+              <Camera size={15} color="var(--pine)" />
+              Scan
+            </button>
             {user.canManageInventory && (
               <button onClick={() => setInventoryOpen(true)} style={{
                 display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
@@ -696,6 +857,13 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                 Manage Inventory
               </button>
             )}
+            <button onClick={() => setAccountsOpen(true)} style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
+              border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
+            }}>
+              <CreditCard size={15} color="var(--pine)" />
+              Accounts
+            </button>
             <button onClick={() => setSummaryOpen(true)} style={{
               display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
               border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
@@ -854,12 +1022,30 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       {receipt && <ReceiptModal sale={receipt} settings={settings} onClose={() => { setReceipt(null); setCartOpen(false); }} />}
       {summaryOpen && <CashierSummaryModal sales={sales} settings={settings} user={user} onClose={() => setSummaryOpen(false)} voidSale={voidSale} />}
       {drugInfoProduct && <DrugInfoModal product={drugInfoProduct} onClose={() => setDrugInfoProduct(null)} />}
+      {scannerOpen && <BarcodeScannerModal onDetect={handleBarcodeScan} onClose={() => setScannerOpen(false)} />}
+      {scanNotice && (
+        <div style={{
+          position: 'fixed', bottom: 20, left: '50%', transform: 'translateX(-50%)', zIndex: 96,
+          background: 'var(--ink)', color: '#fff', fontSize: 13, padding: '10px 16px', borderRadius: 10,
+          boxShadow: '0 6px 20px rgba(0,0,0,0.25)', maxWidth: '90vw', textAlign: 'center'
+        }}>
+          {scanNotice}
+        </div>
+      )}
       {inventoryOpen && (
         <div style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 95, overflow: 'auto', padding: 20 }} className="pos-scroll">
           <button onClick={() => setInventoryOpen(false)} style={{ marginBottom: 16, background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
             <ChevronRight size={14} style={{ transform: 'rotate(180deg)' }} /> Back to sales
           </button>
           <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} user={user} logInventoryChange={logInventoryChange} />
+        </div>
+      )}
+      {accountsOpen && (
+        <div style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 95, overflow: 'auto', padding: 20 }} className="pos-scroll">
+          <button onClick={() => setAccountsOpen(false)} style={{ marginBottom: 16, background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 14px', fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ChevronRight size={14} style={{ transform: 'rotate(180deg)' }} /> Back to sales
+          </button>
+          <AccountsTab sales={sales} settings={settings} settleAccountSale={settleAccountSale} />
         </div>
       )}
     </div>
@@ -1946,8 +2132,14 @@ function BulkEditModal({ products, categories, settings, onApply, onClose }) {
 
 function ProductModal({ product, onClose, onSave }) {
   const [form, setForm] = useState({ ...product });
+  const [scannerOpen, setScannerOpen] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const valid = form.name && form.category && form.sku && form.price !== '' && form.stock !== '';
+
+  // Any barcode scanned while this modal is open — hardware scanner or
+  // camera — fills the SKU field directly rather than acting on the cart,
+  // since there's no cart context here.
+  useBarcodeScanner((code) => set('sku', code), !scannerOpen);
 
   return (
     <div className="pos-modal-backdrop">
@@ -1957,7 +2149,28 @@ function ProductModal({ product, onClose, onSave }) {
           <button className="pos-icon-btn" onClick={onClose} title="Close" style={{ color: 'var(--muted)' }}><X size={18} /></button>
         </div>
         {[
-          ['name', 'Product name', 'text'], ['category', 'Category', 'text'], ['sku', 'SKU', 'text'],
+          ['name', 'Product name', 'text'], ['category', 'Category', 'text'],
+        ].map(([key, label, type]) => (
+          <div key={key} style={{ marginBottom: 10 }}>
+            <label style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</label>
+            <input type={type} value={form[key]} onChange={(e) => set(key, type === 'number' ? e.target.value.replace(/[^0-9.]/g, '') : e.target.value)}
+              style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginTop: 3 }} />
+          </div>
+        ))}
+        <div style={{ marginBottom: 10 }}>
+          <label style={{ fontSize: 12, color: 'var(--muted)' }}>SKU / barcode</label>
+          <div style={{ display: 'flex', gap: 6, marginTop: 3 }}>
+            <input type="text" value={form.sku} onChange={(e) => set('sku', e.target.value)} placeholder="Type it, or scan it"
+              style={{ flex: 1, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
+            <button type="button" onClick={() => setScannerOpen(true)} title="Scan barcode with camera" style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center', width: 38, borderRadius: 8,
+              border: '1px solid var(--border)', background: '#fff', color: 'var(--pine)', flexShrink: 0
+            }}>
+              <Camera size={15} />
+            </button>
+          </div>
+        </div>
+        {[
           ['price', 'Price', 'number'], ['stock', 'Stock quantity', 'number'], ['reorderLevel', 'Reorder level', 'number'], ['expiry', 'Expiry date', 'date'],
         ].map(([key, label, type]) => (
           <div key={key} style={{ marginBottom: 10 }}>
@@ -1974,6 +2187,12 @@ function ProductModal({ product, onClose, onSave }) {
           Save product
         </button>
       </div>
+      {scannerOpen && (
+        <BarcodeScannerModal
+          onDetect={(code) => { set('sku', code); setScannerOpen(false); }}
+          onClose={() => setScannerOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -2678,7 +2897,8 @@ function App() {
   return (
     <StaffPOS inventory={inventory} sales={sales} settings={settings} user={user}
       addSale={addSale} updateStock={updateStock} lastSynced={lastSynced} onLogout={handleLogout}
-      saveInventory={saveInventory} logInventoryChange={logInventoryChange} voidSale={voidSale} />
+      saveInventory={saveInventory} logInventoryChange={logInventoryChange} voidSale={voidSale}
+      settleAccountSale={settleAccountSale} />
   );
 }
 
