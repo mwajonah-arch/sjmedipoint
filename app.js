@@ -316,6 +316,32 @@ ${t.fontImport}
 .pos-scroll::-webkit-scrollbar { width: 8px; height: 8px; }
 .pos-scroll::-webkit-scrollbar-thumb { background: #C7D0C0; border-radius: 4px; }
 
+/* Icon-only buttons (edit / delete / info / close). Fixed hit area kept
+   comfortably tappable on touch screens regardless of the icon's own size. */
+.pos-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0;
+  background: none; border: none; padding: 0; color: inherit;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 0.15s ease;
+}
+.pos-icon-btn:hover:not(:disabled) { background: var(--pine-pale); }
+.pos-icon-btn:active:not(:disabled) { background: var(--border); }
+.pos-icon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.pos-icon-btn-danger:hover:not(:disabled) { background: var(--red-pale); }
+@media (max-width: 860px) {
+  .pos-icon-btn { width: 40px; height: 40px; }
+}
+
+/* Shimmering placeholder blocks for first-load / slow-connection states. */
+@keyframes pos-shimmer { 0% { background-position: -300px 0; } 100% { background-position: 300px 0; } }
+.pos-skeleton {
+  background-image: linear-gradient(90deg, var(--pine-pale) 25%, var(--border) 37%, var(--pine-pale) 63%);
+  background-size: 600px 100%;
+  animation: pos-shimmer 1.4s ease-in-out infinite;
+  border-radius: 8px;
+}
+
 @keyframes pos-spin { to { transform: rotate(360deg); } }
 
 /* Structural classes (kept plain on desktop, overridden below on mobile) */
@@ -509,6 +535,30 @@ function TopBar({ settings, user, onLogout, lastSynced, right }) {
 }
 
 /* ---------------------------------------------------------------------- */
+/* Empty state — used wherever a list has nothing to show yet             */
+/* ---------------------------------------------------------------------- */
+
+function EmptyState({ icon: Icon, title, subtitle, compact }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      textAlign: 'center', padding: compact ? '22px 16px' : '40px 20px',
+    }}>
+      {Icon && (
+        <div style={{
+          width: 40, height: 40, borderRadius: '50%', background: 'var(--pine-pale)', color: 'var(--pine)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 10,
+        }}>
+          <Icon size={18} />
+        </div>
+      )}
+      <div style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
+      {subtitle && <div style={{ fontSize: 12.5, color: 'var(--muted)', marginTop: 3, maxWidth: 280 }}>{subtitle}</div>}
+    </div>
+  );
+}
+
+/* ---------------------------------------------------------------------- */
 /* Staff / Cashier POS                                                     */
 /* ---------------------------------------------------------------------- */
 
@@ -697,8 +747,8 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                       <CheckCircle size={16} /> Added
                     </div>
                   )}
-                  <button onClick={(e) => { e.stopPropagation(); setDrugInfoProduct(p); }} title="AI dosage / side effects / interactions lookup" style={{
-                    position: 'absolute', top: 8, left: 8, background: 'none', border: 'none', color: 'var(--muted)', padding: 4
+                  <button className="pos-icon-btn" onClick={(e) => { e.stopPropagation(); setDrugInfoProduct(p); }} title="AI dosage / side effects / interactions lookup" style={{
+                    position: 'absolute', top: 5, left: 5, color: 'var(--muted)'
                   }}><Info size={14} /></button>
                   {p.requiresRx && (
                     <span style={{
@@ -707,7 +757,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                       padding: '1px 5px', transform: 'rotate(4deg)'
                     }}>℞ Rx</span>
                   )}
-                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', marginBottom: 4, marginLeft: 18 }}>{p.category}</div>
+                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', marginBottom: 4, marginLeft: 36 }}>{p.category}</div>
                   <div className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 6, lineHeight: 1.25 }}>{p.name}</div>
                   <div className="pos-mono" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{p.sku}</div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -727,7 +777,11 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
 
               );
             })}
-            {filtered.length === 0 && <p style={{ color: 'var(--muted)', fontSize: 14 }}>No products match your search.</p>}
+            {filtered.length === 0 && (
+              <div style={{ gridColumn: '1 / -1' }}>
+                <EmptyState icon={Search} title="No products match your search" subtitle="Try a different name, SKU, or category." />
+              </div>
+            )}
           </div>
         </div>
 
@@ -738,17 +792,17 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
               <ShoppingCart size={16} />
               <span className="pos-serif" style={{ fontWeight: 600, fontSize: 15 }}>Current sale</span>
             </div>
-            <button className="pos-cart-close-btn" onClick={() => setCartOpen(false)} style={{ background: 'none', border: 'none', color: 'var(--muted)', alignItems: 'center', justifyContent: 'center' }}>
+            <button className="pos-cart-close-btn pos-icon-btn" onClick={() => setCartOpen(false)} title="Close cart" style={{ color: 'var(--muted)' }}>
               <X size={20} />
             </button>
           </div>
           <div style={{ flex: 1, overflowY: 'auto', padding: '10px 16px' }} className="pos-scroll">
-            {cart.length === 0 && <p style={{ color: 'var(--muted)', fontSize: 13, marginTop: 20 }}>Tap a product to add it to the sale.</p>}
+            {cart.length === 0 && <EmptyState icon={ShoppingCart} title="Cart is empty" subtitle="Tap a product to add it to the sale." />}
             {cart.map((i) => (
               <div key={i.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
                   <span style={{ fontSize: 13, fontWeight: 500 }}>{i.name}{i.requiresRx ? ' ℞' : ''}</span>
-                  <button onClick={() => removeFromCart(i.id)} style={{ background: 'none', border: 'none', color: 'var(--muted)' }}><Trash2 size={13} /></button>
+                  <button className="pos-icon-btn pos-icon-btn-danger" onClick={() => removeFromCart(i.id)} title="Remove from cart" style={{ color: 'var(--muted)' }}><Trash2 size={13} /></button>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -878,7 +932,7 @@ function CashierSummaryModal({ sales, settings, user, onClose, voidSale }) {
       <div className="pos-modal" style={{ background: '#fff', borderRadius: 14, padding: 24, maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <span className="pos-serif" style={{ fontSize: 18, fontWeight: 700 }}>Your day so far</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
+          <button className="pos-icon-btn" onClick={onClose} title="Close" style={{ color: 'var(--muted)' }}><X size={18} /></button>
         </div>
 
         <div style={{ display: 'flex', gap: 12, marginBottom: 20 }}>
@@ -990,7 +1044,7 @@ function DrugInfoModal({ product, onClose }) {
       <div className="pos-modal" style={{ background: '#fff', borderRadius: 14, padding: 24, maxHeight: '85vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
           <span className="pos-serif" style={{ fontSize: 18, fontWeight: 700 }}>{product.name}{product.requiresRx ? ' ℞' : ''}</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
+          <button className="pos-icon-btn" onClick={onClose} title="Close" style={{ color: 'var(--muted)' }}><X size={18} /></button>
         </div>
         <div style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 16 }}>AI-generated reference · not medical advice</div>
 
@@ -1107,7 +1161,7 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
       <div className="pos-modal" style={{ background: '#fff', borderRadius: 14, padding: 24, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
           <span className="pos-serif" style={{ fontSize: 18, fontWeight: 700 }}>Complete sale</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
+          <button className="pos-icon-btn" onClick={onClose} title="Close" style={{ color: 'var(--muted)' }}><X size={18} /></button>
         </div>
 
         <div className="pos-scroll" style={{ maxHeight: 160, overflowY: 'auto', border: '1px solid var(--border)', borderRadius: 10, marginBottom: 14 }}>
@@ -1495,7 +1549,7 @@ function DashboardTab({ inventory, sales, settings }) {
           <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <TrendingUp size={15} color="var(--pine)" /> Top sellers ({rangeLabel.toLowerCase()})
           </h3>
-          {topSelling.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No sales in this period yet.</p>}
+          {topSelling.length === 0 && <EmptyState icon={TrendingUp} title="No sales in this period yet" compact />}
           {topSelling.map((item, i) => (
             <div key={item.name + i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <span>{item.name}</span>
@@ -1534,7 +1588,7 @@ function DashboardTab({ inventory, sales, settings }) {
           <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <Receipt size={15} /> Recent transactions
           </h3>
-          {recent.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No sales recorded yet.</p>}
+          {recent.length === 0 && <EmptyState icon={Receipt} title="No sales recorded yet" compact />}
           {recent.map((s) => (
             <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <span style={{ textDecoration: s.voided ? 'line-through' : 'none', color: s.voided ? 'var(--muted)' : 'var(--ink)' }}>{s.cashier} · {new Date(s.timestamp).toLocaleTimeString()}</span>
@@ -1737,7 +1791,7 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
 
       <div className="pos-table-scroll" style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12 }}>
         <div style={{ minWidth: 680 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '30px 2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 84px', padding: '10px 16px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '30px 2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 116px', padding: '10px 16px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
             <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAll} />
             <SortHeader label="Product" sortKey="name" />
             <SortHeader label="Category" sortKey="category" />
@@ -1751,7 +1805,7 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
             const expDays = daysUntilExpiry(p.expiry);
             const expiringSoon = expDays !== null && expDays <= EXPIRY_WINDOW_DAYS;
             return (
-            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '30px 2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 84px', padding: '10px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center', background: selectedIds.has(p.id) ? 'var(--pine-pale)' : 'transparent' }}>
+            <div key={p.id} style={{ display: 'grid', gridTemplateColumns: '30px 2fr 1.2fr 1fr 0.8fr 0.8fr 1fr 116px', padding: '10px 16px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center', background: selectedIds.has(p.id) ? 'var(--pine-pale)' : 'transparent' }}>
               <input type="checkbox" checked={selectedIds.has(p.id)} onChange={() => toggleSelected(p.id)} />
               <span>{p.name}{p.requiresRx ? ' ℞' : ''}</span>
               <span style={{ color: 'var(--muted)' }}>{p.category}</span>
@@ -1760,9 +1814,9 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
               <span style={{ color: p.stock <= p.reorderLevel ? 'var(--red)' : 'var(--ink)' }}>{p.stock}</span>
               <span style={{ color: expiringSoon ? (expDays < 0 ? 'var(--red)' : 'var(--amber)') : 'var(--muted)', fontSize: 12, fontWeight: expiringSoon ? 600 : 400 }} title={expiringSoon ? expiryLabel(expDays) : ''}>{p.expiry}</span>
               <span style={{ display: 'flex', gap: 6 }}>
-                <button onClick={() => setDrugInfoProduct(p)} title="AI dosage / side effects / interactions lookup" style={{ background: 'none', border: 'none', color: 'var(--pine)' }}><Info size={14} /></button>
-                <button onClick={() => setModalProduct(p)} style={{ background: 'none', border: 'none', color: 'var(--muted)' }}><Edit2 size={14} /></button>
-                <button onClick={() => setConfirmDeleteId(p.id)} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>
+                <button className="pos-icon-btn" onClick={() => setDrugInfoProduct(p)} title="AI dosage / side effects / interactions lookup" style={{ color: 'var(--pine)' }}><Info size={14} /></button>
+                <button className="pos-icon-btn" onClick={() => setModalProduct(p)} title="Edit product" style={{ color: 'var(--muted)' }}><Edit2 size={14} /></button>
+                <button className="pos-icon-btn pos-icon-btn-danger" onClick={() => setConfirmDeleteId(p.id)} title="Delete product" style={{ color: 'var(--red)' }}><Trash2 size={14} /></button>
               </span>
             </div>
             );
@@ -1835,7 +1889,7 @@ function BulkEditModal({ products, categories, settings, onApply, onClose }) {
       <div style={{ width: 420, maxWidth: '100%', background: '#fff', borderRadius: 14, padding: 24, maxHeight: '85vh', overflowY: 'auto' }} className="pos-scroll">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
           <span className="pos-serif" style={{ fontSize: 17, fontWeight: 700 }}>Bulk edit</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
+          <button className="pos-icon-btn" onClick={onClose} title="Close" style={{ color: 'var(--muted)' }}><X size={18} /></button>
         </div>
         <p style={{ fontSize: 12.5, color: 'var(--muted)', marginBottom: 18 }}>
           Applies to {products.length} selected product{products.length !== 1 ? 's' : ''}: {products.slice(0, 4).map((p) => p.name).join(', ')}{products.length > 4 ? `, +${products.length - 4} more` : ''}.
@@ -1900,7 +1954,7 @@ function ProductModal({ product, onClose, onSave }) {
       <div style={{ width: 420, maxWidth: '100%', background: '#fff', borderRadius: 14, padding: 24, maxHeight: '85vh', overflowY: 'auto' }} className="pos-scroll">
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
           <span className="pos-serif" style={{ fontSize: 17, fontWeight: 700 }}>{product.id ? 'Edit product' : 'Add product'}</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
+          <button className="pos-icon-btn" onClick={onClose} title="Close" style={{ color: 'var(--muted)' }}><X size={18} /></button>
         </div>
         {[
           ['name', 'Product name', 'text'], ['category', 'Category', 'text'], ['sku', 'SKU', 'text'],
@@ -1962,7 +2016,7 @@ function ActivityTab({ inventoryLog }) {
       </div>
 
       <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-        {filtered.length === 0 && <p style={{ padding: 16, fontSize: 13, color: 'var(--muted)' }}>No inventory changes in this range.</p>}
+        {filtered.length === 0 && <EmptyState icon={ClipboardList} title="No inventory changes in this range" subtitle="Try widening the date filter above." />}
         {filtered.map((e) => {
           const meta = ACTIVITY_ACTION_META[e.action] || ACTIVITY_ACTION_META.edit;
           return (
@@ -2029,7 +2083,7 @@ function SalesTab({ sales, settings, voidSale }) {
       </div>
 
       <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, overflow: 'hidden' }}>
-        {filtered.length === 0 && <p style={{ padding: 16, fontSize: 13, color: 'var(--muted)' }}>No transactions in this range.</p>}
+        {filtered.length === 0 && <EmptyState icon={Receipt} title="No transactions in this range" subtitle="Try widening the date filter above." />}
         {filtered.map((s) => (
           <div key={s.id} style={{ borderBottom: '1px solid var(--border)' }}>
             <div onClick={() => setExpanded(expanded === s.id ? null : s.id)} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', cursor: 'pointer', fontSize: 13 }}>
@@ -2125,8 +2179,12 @@ function AccountsTab({ sales, settings, settleAccountSale }) {
         </div>
       )}
 
-      {allCustomers.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No outstanding balances right now.</p>}
-      {allCustomers.length > 0 && customers.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No customers match "{query}".</p>}
+      {allCustomers.length === 0 && (
+        <EmptyState icon={Users} title="No customer accounts yet" subtitle="Balances appear here once a sale is rung up as “on account.”" />
+      )}
+      {allCustomers.length > 0 && customers.length === 0 && (
+        <EmptyState icon={Search} title={`No customers match "${query}"`} subtitle="Check the spelling or try a shorter search." compact />
+      )}
 
       {customers.map((c) => {
         const waDigits = toWhatsappDigits(c.phone);
@@ -2302,8 +2360,8 @@ function StaffTab({ staffList, saveStaff }) {
                   </label>
                 )}
                 <span className="pos-mono" style={{ color: 'var(--muted)' }}>PIN ••••</span>
-                <button onClick={() => startEdit(s)} title="Change name or PIN" style={{ background: 'none', border: 'none', color: 'var(--muted)' }}><Edit2 size={14} /></button>
-                {s.role !== 'admin' && <button onClick={() => setConfirmDeleteId(s.id)} disabled={busy} style={{ background: 'none', border: 'none', color: 'var(--red)' }}><Trash2 size={14} /></button>}
+                <button className="pos-icon-btn" onClick={() => startEdit(s)} title="Change name or PIN" style={{ color: 'var(--muted)' }}><Edit2 size={14} /></button>
+                {s.role !== 'admin' && <button className="pos-icon-btn pos-icon-btn-danger" onClick={() => setConfirmDeleteId(s.id)} disabled={busy} title="Remove staff account" style={{ color: 'var(--red)' }}><Trash2 size={14} /></button>}
               </span>
             </div>
           )
@@ -2591,7 +2649,14 @@ function App() {
     return (
       <div className="pos-root" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <style>{buildStyles(settings.theme)}</style>
-        <p style={{ color: 'var(--muted)', fontSize: 14 }}>Loading pharmacy data…</p>
+        <div style={{ width: 320, maxWidth: '100%', padding: '0 24px' }}>
+          <div className="pos-skeleton" style={{ width: 52, height: 52, borderRadius: 12, margin: '0 auto 18px' }} />
+          <div className="pos-skeleton" style={{ width: '55%', height: 15, margin: '0 auto 10px' }} />
+          <div className="pos-skeleton" style={{ width: '35%', height: 11, margin: '0 auto 26px' }} />
+          <div className="pos-skeleton" style={{ width: '100%', height: 42, borderRadius: 10, marginBottom: 10 }} />
+          <div className="pos-skeleton" style={{ width: '100%', height: 42, borderRadius: 10 }} />
+          <p style={{ textAlign: 'center', color: 'var(--muted)', fontSize: 12.5, marginTop: 22 }}>Loading pharmacy data…</p>
+        </div>
       </div>
     );
   }
