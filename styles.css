@@ -34,6 +34,7 @@ body { background: #EEF1EA; }
 /* Structural classes (kept plain on desktop, overridden below on mobile) */
 .pos-topbar { display: flex; align-items: center; justify-content: space-between; padding: 14px 24px; background: var(--pine); color: #fff; flex-wrap: wrap; gap: 8px; }
 .pos-topbar-right { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.pos-topbar-actions-full { display: flex; align-items: center; gap: 6px; }
 .pos-topbar-actions-more { display: none; }
 .pos-staff-layout { display: flex; height: calc(100vh - 62px); }
 .pos-product-panel { flex: 1; padding: 20px; overflow-y: auto; }
