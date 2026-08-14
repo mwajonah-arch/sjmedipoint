@@ -510,6 +510,8 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [inventoryOpen, setInventoryOpen] = useState(false);
+  const [flashId, setFlashId] = useState(null);
+  const flashTimer = useRef(null);
 
   const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()) && !s.voided);
   const myTodayRevenue = myTodaySales.reduce((sum, s) => sum + s.total, 0);
@@ -522,6 +524,29 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
     return matchQ && matchC;
   });
 
+  // Top-selling products across all recorded (non-voided) sales, most
+  // frequently rung up first. Surfaced as a quick-access row so a cashier
+  // doesn't have to hunt through the full grid for staples like ORS or
+  // Paracetamol. Only meaningful once there's some sales history.
+  const frequentProducts = useMemo(() => {
+    const counts = {};
+    for (const s of sales) {
+      if (s.voided) continue;
+      for (const item of s.items || []) {
+        counts[item.id] = (counts[item.id] || 0) + item.qty;
+      }
+    }
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 8)
+      .map(([id]) => inventory.find((p) => p.id === id))
+      .filter((p) => p && p.stock > 0);
+  }, [sales, inventory]);
+
+  const showFrequentRow = frequentProducts.length >= 3 && query === '' && category === 'All';
+
+  useEffect(() => () => { if (flashTimer.current) clearTimeout(flashTimer.current); }, []);
+
   const addToCart = (product) => {
     if (product.stock <= 0) return;
     setCart((c) => {
@@ -532,6 +557,11 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       }
       return [...c, { id: product.id, name: product.name, price: product.price, qty: 1, requiresRx: product.requiresRx, maxStock: product.stock }];
     });
+    // Brief visual confirmation that the tap registered — most useful on
+    // the mobile drawer layout, where the cart panel isn't on screen.
+    setFlashId(product.id);
+    if (flashTimer.current) clearTimeout(flashTimer.current);
+    flashTimer.current = setTimeout(() => setFlashId(null), 600);
   };
 
   const changeQty = (id, delta) => {
@@ -614,6 +644,26 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
             </button>
           </div>
 
+          {showFrequentRow && (
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', marginBottom: 8 }}>Frequently sold</div>
+              <div className="pos-scroll" style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 4 }}>
+                {frequentProducts.map((p) => (
+                  <button key={p.id} onClick={() => addToCart(p)} style={{
+                    flex: '0 0 auto', display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2,
+                    padding: '8px 12px', borderRadius: 9, minWidth: 112, textAlign: 'left',
+                    border: flashId === p.id ? '1px solid var(--pine)' : '1px solid var(--border)',
+                    background: flashId === p.id ? 'var(--pine-pale)' : '#fff',
+                    transition: 'background-color 0.2s ease, border-color 0.2s ease'
+                  }}>
+                    <span style={{ fontSize: 12.5, fontWeight: 600, lineHeight: 1.25 }}>{p.name}</span>
+                    <span className="pos-mono" style={{ fontSize: 11.5, color: 'var(--muted)' }}>{formatMoney(p.price, settings.currency)}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="pos-product-grid">
             {filtered.map((p) => {
               const low = p.stock <= p.reorderLevel;
@@ -626,6 +676,15 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                   borderRadius: 10, padding: '14px 14px 12px', position: 'relative',
                   opacity: out ? 0.5 : 1, cursor: out ? 'not-allowed' : 'pointer'
                 }}>
+                  {flashId === p.id && (
+                    <div style={{
+                      position: 'absolute', inset: 0, borderRadius: 10, background: 'rgba(22,66,60,0.88)',
+                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, color: '#fff',
+                      fontSize: 13, fontWeight: 600, pointerEvents: 'none'
+                    }}>
+                      <CheckCircle size={16} /> Added
+                    </div>
+                  )}
                   <button onClick={(e) => { e.stopPropagation(); setDrugInfoProduct(p); }} title="AI dosage / side effects / interactions lookup" style={{
                     position: 'absolute', top: 8, left: 8, background: 'none', border: 'none', color: 'var(--muted)', padding: 4
                   }}><Info size={14} /></button>
@@ -1079,6 +1138,24 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
             <label style={{ fontSize: 12, color: 'var(--muted)' }}>Amount tendered</label>
             <input type="number" value={tendered} onChange={(e) => setTendered(e.target.value)} placeholder={formatMoney(total, settings.currency)}
               style={{ width: '100%', padding: '10px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 15, marginTop: 4 }} />
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+              {[50, 100, 200, 500, 1000].map((amt) => (
+                <button key={amt} type="button" onClick={() => setTendered((t) => String((parseFloat(t) || 0) + amt))}
+                  style={{ padding: '6px 10px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 12, fontWeight: 600 }}>
+                  +{settings.currency} {amt}
+                </button>
+              ))}
+              <button type="button" onClick={() => setTendered(String(total))}
+                style={{ padding: '6px 10px', borderRadius: 7, border: '1px solid var(--pine)', background: 'var(--pine-pale)', color: 'var(--pine)', fontSize: 12, fontWeight: 600 }}>
+                Exact amount
+              </button>
+              {tendered !== '' && (
+                <button type="button" onClick={() => setTendered('')}
+                  style={{ padding: '6px 10px', borderRadius: 7, border: '1px solid var(--border)', background: '#fff', color: 'var(--muted)', fontSize: 12 }}>
+                  Clear
+                </button>
+              )}
+            </div>
             {tenderedNum > 0 && (
               <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginTop: 8, color: tenderedNum < total ? 'var(--red)' : 'var(--muted)' }}>
                 <span>{tenderedNum < total ? 'Insufficient amount' : 'Change due'}</span>
