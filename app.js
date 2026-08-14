@@ -1393,22 +1393,78 @@ function RevenueTrend({ sales, settings }) {
   );
 }
 
+// Whether a timestamp falls within a given reporting window, anchored to
+// calendar boundaries (start of today / start of this week / start of this
+// month) rather than a rolling N-day lookback, since that's what a pharmacy
+// owner planning restocks or checking in on the month actually expects.
+function isInDashboardRange(timestamp, range) {
+  const d = new Date(timestamp);
+  const now = new Date();
+  if (range === 'today') return isSameDay(timestamp, now);
+  if (range === 'week') {
+    const start = new Date(now);
+    const dow = start.getDay(); // 0 = Sun
+    const diffToMonday = dow === 0 ? 6 : dow - 1;
+    start.setDate(start.getDate() - diffToMonday);
+    start.setHours(0, 0, 0, 0);
+    return d >= start && d <= now;
+  }
+  if (range === 'month') {
+    const start = new Date(now.getFullYear(), now.getMonth(), 1);
+    return d >= start && d <= now;
+  }
+  return true;
+}
+
+const DASHBOARD_RANGES = [
+  { key: 'today', label: 'Today' },
+  { key: 'week', label: 'This week' },
+  { key: 'month', label: 'This month' },
+];
+
 function DashboardTab({ inventory, sales, settings }) {
-  const today = new Date();
-  const todaySales = sales.filter((s) => isSameDay(s.timestamp, today) && !s.voided);
-  const revenue = todaySales.reduce((sum, s) => sum + s.total, 0);
+  const [range, setRange] = useState('today');
+  const rangeLabel = DASHBOARD_RANGES.find((r) => r.key === range).label;
+  const rangeSales = sales.filter((s) => isInDashboardRange(s.timestamp, range) && !s.voided);
+  const revenue = rangeSales.reduce((sum, s) => sum + s.total, 0);
   const lowStock = inventory.filter((p) => p.stock <= p.reorderLevel);
   const expiringSoon = inventory
     .filter((p) => p.stock > 0 && daysUntilExpiry(p.expiry) !== null && daysUntilExpiry(p.expiry) <= EXPIRY_WINDOW_DAYS)
     .sort((a, b) => daysUntilExpiry(a.expiry) - daysUntilExpiry(b.expiry));
   const recent = [...sales].sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp)).slice(0, 6);
 
+  // What's actually moving, for the selected window — the most actionable
+  // number for restock decisions, since low-stock alone doesn't say whether
+  // a slow mover is worth reordering.
+  const topSelling = useMemo(() => {
+    const counts = {};
+    for (const s of rangeSales) {
+      for (const item of s.items || []) {
+        if (!counts[item.id]) counts[item.id] = { name: item.name, qty: 0, revenue: 0 };
+        counts[item.id].qty += item.qty;
+        counts[item.id].revenue += item.price * item.qty;
+      }
+    }
+    return Object.values(counts).sort((a, b) => b.qty - a.qty).slice(0, 8);
+  }, [rangeSales]);
+
   return (
     <div>
-      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 16 }}>Today at a glance</h2>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 16 }}>
+        <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700 }}>{rangeLabel} at a glance</h2>
+        <div style={{ display: 'flex', gap: 4, background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 9, padding: 3 }}>
+          {DASHBOARD_RANGES.map((r) => (
+            <button key={r.key} onClick={() => setRange(r.key)} style={{
+              padding: '6px 12px', borderRadius: 7, border: 'none', fontSize: 12.5, fontWeight: 600,
+              background: range === r.key ? 'var(--pine)' : 'transparent',
+              color: range === r.key ? '#fff' : 'var(--muted)'
+            }}>{r.label}</button>
+          ))}
+        </div>
+      </div>
       <div className="pos-stat-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 12, marginBottom: 24 }}>
-        <StatCard label="Revenue today" value={formatMoney(revenue, settings.currency)} />
-        <StatCard label="Transactions today" value={todaySales.length} />
+        <StatCard label={`Revenue ${range === 'today' ? 'today' : rangeLabel.toLowerCase()}`} value={formatMoney(revenue, settings.currency)} />
+        <StatCard label={`Transactions ${range === 'today' ? 'today' : rangeLabel.toLowerCase()}`} value={rangeSales.length} />
         <StatCard label="Products tracked" value={inventory.length} />
         <StatCard label="Low stock alerts" value={lowStock.length} accent={lowStock.length ? 'var(--red)' : undefined} />
         <StatCard label="Expiring within 30d" value={expiringSoon.length} accent={expiringSoon.length ? 'var(--red)' : undefined} />
@@ -1417,12 +1473,24 @@ function DashboardTab({ inventory, sales, settings }) {
       <div className="pos-dash-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <RevenueTrend sales={sales} settings={settings} />
         <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: 16, marginBottom: 20 }}>
-          <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>Today's payments</h3>
-          <PaymentMethodBars sales={todaySales} settings={settings} />
+          <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 12 }}>{rangeLabel}'s payments</h3>
+          <PaymentMethodBars sales={rangeSales} settings={settings} />
         </div>
       </div>
 
-      <div className="pos-dash-columns" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 20 }}>
+      <div className="pos-dash-columns" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 20 }}>
+        <div>
+          <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <TrendingUp size={15} color="var(--pine)" /> Top sellers ({rangeLabel.toLowerCase()})
+          </h3>
+          {topSelling.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No sales in this period yet.</p>}
+          {topSelling.map((item, i) => (
+            <div key={item.name + i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+              <span>{item.name}</span>
+              <span className="pos-mono" style={{ color: 'var(--muted)' }}>{item.qty} sold</span>
+            </div>
+          ))}
+        </div>
         <div>
           <h3 className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
             <AlertTriangle size={15} color="var(--amber)" /> Needs reordering
