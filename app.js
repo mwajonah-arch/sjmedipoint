@@ -824,7 +824,35 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
     <div className="pos-root" style={{ minHeight: '100vh' }}>
       <style>{buildStyles(settings.theme)}</style>
       <TopBar settings={settings} user={user} onLogout={onLogout} lastSynced={lastSynced}
-        right={<div style={{ fontSize: 12, opacity: 0.85 }}>{cart.length} item{cart.length !== 1 ? 's' : ''} in cart</div>} />
+        right={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button onClick={() => setSummaryOpen(true)} title="Today's sales summary" style={{
+              display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
+              border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
+            }}>
+              <TrendingUp size={14} />
+              <span className="pos-mono" style={{ fontWeight: 600 }}>{formatMoney(myTodayRevenue, settings.currency)}</span>
+              <span className="pos-topbar-action-label" style={{ opacity: 0.75 }}>today</span>
+            </button>
+            <button onClick={() => setAccountsOpen(true)} title="Accounts" style={{
+              display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
+              border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
+            }}>
+              <CreditCard size={14} />
+              <span className="pos-topbar-action-label">Accounts</span>
+            </button>
+            {user.canManageInventory && (
+              <button onClick={() => setInventoryOpen(true)} title="Manage inventory" style={{
+                display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
+                border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
+              }}>
+                <Package size={14} />
+                <span className="pos-topbar-action-label">Inventory</span>
+              </button>
+            )}
+            <div style={{ fontSize: 12, opacity: 0.85, marginLeft: 4 }}>{cart.length} item{cart.length !== 1 ? 's' : ''} in cart</div>
+          </div>
+        } />
 
       <div className="pos-staff-layout">
         {/* Product browser */}
@@ -847,30 +875,6 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
             }}>
               <Camera size={15} color="var(--pine)" />
               Scan
-            </button>
-            {user.canManageInventory && (
-              <button onClick={() => setInventoryOpen(true)} style={{
-                display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
-                border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
-              }}>
-                <Package size={15} color="var(--pine)" />
-                Manage Inventory
-              </button>
-            )}
-            <button onClick={() => setAccountsOpen(true)} style={{
-              display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
-              border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
-            }}>
-              <CreditCard size={15} color="var(--pine)" />
-              Accounts
-            </button>
-            <button onClick={() => setSummaryOpen(true)} style={{
-              display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
-              border: '1px solid var(--border)', background: '#fff', color: 'var(--ink)', fontSize: 13
-            }}>
-              <TrendingUp size={15} color="var(--pine)" />
-              <span style={{ fontWeight: 600 }} className="pos-mono">{formatMoney(myTodayRevenue, settings.currency)}</span>
-              <span style={{ color: 'var(--muted)' }}>today</span>
             </button>
           </div>
 
@@ -916,18 +920,16 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                     </div>
                   )}
                   <button className="pos-icon-btn" onClick={(e) => { e.stopPropagation(); setDrugInfoProduct(p); }} title="AI dosage / side effects / interactions lookup" style={{
-                    position: 'absolute', top: 5, left: 5, color: 'var(--muted)'
-                  }}><Info size={14} /></button>
+                    position: 'absolute', top: 6, right: 6, color: 'var(--muted)', opacity: 0.6
+                  }}><Info size={13} /></button>
                   {p.requiresRx && (
                     <span style={{
-                      position: 'absolute', top: 10, right: 10, fontSize: 10, fontWeight: 700,
-                      color: 'var(--amber)', border: '1px solid var(--amber)', borderRadius: 5,
-                      padding: '1px 5px', transform: 'rotate(4deg)'
+                      fontSize: 10, fontWeight: 700, color: 'var(--amber)', border: '1px solid var(--amber)',
+                      borderRadius: 5, padding: '1px 5px', marginBottom: 4, display: 'inline-block'
                     }}>℞ Rx</span>
                   )}
-                  <div style={{ fontSize: 10, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', marginBottom: 4, marginLeft: 36 }}>{p.category}</div>
-                  <div className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 6, lineHeight: 1.25 }}>{p.name}</div>
-                  <div className="pos-mono" style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 8 }}>{p.sku}</div>
+                  <div className="pos-serif" style={{ fontSize: 15, fontWeight: 600, marginBottom: 3, lineHeight: 1.25, paddingRight: 18 }}>{p.name}</div>
+                  <div className="pos-mono" style={{ fontSize: 10.5, color: 'var(--muted)', marginBottom: 8 }}>{p.category} · {p.sku}</div>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                     <span className="pos-mono" style={{ fontSize: 15, fontWeight: 500 }}>{formatMoney(p.price, settings.currency)}</span>
                     <span style={{
