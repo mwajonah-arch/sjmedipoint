@@ -4,7 +4,7 @@ import {
   ShoppingCart, Plus, Minus, Trash2, Search, LogOut, Package, TrendingUp,
   AlertTriangle, Users, Settings as SettingsIcon, Receipt, CheckCircle, X,
   Pill, Edit2, ChevronRight, Banknote, CreditCard, Smartphone, LayoutDashboard,
-  ClipboardList, Info, ScanLine
+  ClipboardList, Info, Printer
 } from 'https://esm.sh/lucide-react@0.383.0?deps=react@18';
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
 
@@ -42,19 +42,19 @@ const supabase = createClient(
 /* ---------------------------------------------------------------------- */
 
 const DEFAULT_INVENTORY = [
-  { id: 'p1', name: 'Paracetamol 500mg', category: 'Pain Relief', sku: 'PCM-500', barcode: '6161100000017', price: 50, stock: 200, reorderLevel: 30, expiry: '2027-03-01', requiresRx: false },
-  { id: 'p2', name: 'Ibuprofen 400mg', category: 'Pain Relief', sku: 'IBU-400', barcode: '6161100000024', price: 80, stock: 150, reorderLevel: 25, expiry: '2026-11-15', requiresRx: false },
-  { id: 'p3', name: 'Amoxicillin 500mg', category: 'Antibiotics', sku: 'AMX-500', barcode: '6161100000031', price: 250, stock: 60, reorderLevel: 20, expiry: '2026-09-10', requiresRx: true },
-  { id: 'p4', name: 'Metformin 500mg', category: 'Diabetes', sku: 'MET-500', barcode: '6161100000048', price: 180, stock: 40, reorderLevel: 15, expiry: '2027-01-20', requiresRx: true },
-  { id: 'p5', name: 'Amlodipine 5mg', category: 'Cardiovascular', sku: 'AML-5', barcode: '6161100000055', price: 220, stock: 8, reorderLevel: 10, expiry: '2026-12-05', requiresRx: true },
-  { id: 'p6', name: 'Cetirizine 10mg', category: 'Allergy', sku: 'CET-10', barcode: '6161100000062', price: 90, stock: 100, reorderLevel: 20, expiry: '2027-05-01', requiresRx: false },
-  { id: 'p7', name: 'Omeprazole 20mg', category: 'Digestive', sku: 'OMP-20', barcode: '6161100000079', price: 150, stock: 55, reorderLevel: 15, expiry: '2026-10-18', requiresRx: true },
-  { id: 'p8', name: 'ORS Sachets', category: 'First Aid', sku: 'ORS-01', barcode: '6161100000086', price: 40, stock: 300, reorderLevel: 50, expiry: '2027-08-01', requiresRx: false },
-  { id: 'p9', name: 'Vitamin C 1000mg', category: 'Vitamins', sku: 'VITC-1000', barcode: '6161100000093', price: 350, stock: 70, reorderLevel: 15, expiry: '2027-02-14', requiresRx: false },
-  { id: 'p10', name: 'Cough Syrup 100ml', category: 'Respiratory', sku: 'CGH-100', barcode: '6161100000109', price: 280, stock: 45, reorderLevel: 10, expiry: '2026-08-30', requiresRx: false },
-  { id: 'p11', name: 'Elastic Bandage', category: 'First Aid', sku: 'BND-01', barcode: '6161100000116', price: 120, stock: 80, reorderLevel: 15, expiry: '2028-01-01', requiresRx: false },
-  { id: 'p12', name: 'Hand Sanitizer 250ml', category: 'Hygiene', sku: 'SNT-250', barcode: '6161100000123', price: 200, stock: 90, reorderLevel: 20, expiry: '2028-06-01', requiresRx: false },
-  { id: 'p13', name: 'Multivitamin Syrup (Kids)', category: 'Vitamins', sku: 'MVK-100', barcode: '6161100000130', price: 320, stock: 6, reorderLevel: 10, expiry: '2026-09-05', requiresRx: false },
+  { id: 'p1', name: 'Paracetamol 500mg', category: 'Pain Relief', sku: 'PCM-500', price: 50, stock: 200, reorderLevel: 30, expiry: '2027-03-01', requiresRx: false },
+  { id: 'p2', name: 'Ibuprofen 400mg', category: 'Pain Relief', sku: 'IBU-400', price: 80, stock: 150, reorderLevel: 25, expiry: '2026-11-15', requiresRx: false },
+  { id: 'p3', name: 'Amoxicillin 500mg', category: 'Antibiotics', sku: 'AMX-500', price: 250, stock: 60, reorderLevel: 20, expiry: '2026-09-10', requiresRx: true },
+  { id: 'p4', name: 'Metformin 500mg', category: 'Diabetes', sku: 'MET-500', price: 180, stock: 40, reorderLevel: 15, expiry: '2027-01-20', requiresRx: true },
+  { id: 'p5', name: 'Amlodipine 5mg', category: 'Cardiovascular', sku: 'AML-5', price: 220, stock: 8, reorderLevel: 10, expiry: '2026-12-05', requiresRx: true },
+  { id: 'p6', name: 'Cetirizine 10mg', category: 'Allergy', sku: 'CET-10', price: 90, stock: 100, reorderLevel: 20, expiry: '2027-05-01', requiresRx: false },
+  { id: 'p7', name: 'Omeprazole 20mg', category: 'Digestive', sku: 'OMP-20', price: 150, stock: 55, reorderLevel: 15, expiry: '2026-10-18', requiresRx: true },
+  { id: 'p8', name: 'ORS Sachets', category: 'First Aid', sku: 'ORS-01', price: 40, stock: 300, reorderLevel: 50, expiry: '2027-08-01', requiresRx: false },
+  { id: 'p9', name: 'Vitamin C 1000mg', category: 'Vitamins', sku: 'VITC-1000', price: 350, stock: 70, reorderLevel: 15, expiry: '2027-02-14', requiresRx: false },
+  { id: 'p10', name: 'Cough Syrup 100ml', category: 'Respiratory', sku: 'CGH-100', price: 280, stock: 45, reorderLevel: 10, expiry: '2026-08-30', requiresRx: false },
+  { id: 'p11', name: 'Elastic Bandage', category: 'First Aid', sku: 'BND-01', price: 120, stock: 80, reorderLevel: 15, expiry: '2028-01-01', requiresRx: false },
+  { id: 'p12', name: 'Hand Sanitizer 250ml', category: 'Hygiene', sku: 'SNT-250', price: 200, stock: 90, reorderLevel: 20, expiry: '2028-06-01', requiresRx: false },
+  { id: 'p13', name: 'Multivitamin Syrup (Kids)', category: 'Vitamins', sku: 'MVK-100', price: 320, stock: 6, reorderLevel: 10, expiry: '2026-09-05', requiresRx: false },
 ];
 
 const DEFAULT_STAFF = [
@@ -63,7 +63,7 @@ const DEFAULT_STAFF = [
   { id: 's3', name: 'Kevin Otieno', role: 'staff', canManageInventory: false },
 ];
 
-const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxRate: 16, sessionTimeoutMinutes: 5 };
+const DEFAULT_SETTINGS = { pharmacyName: 'Amani Pharmacy', currency: 'KSh', taxRate: 16, sessionTimeoutMinutes: 5, theme: 'earthy' };
 
 const EXPIRY_WINDOW_DAYS = 30;
 
@@ -192,69 +192,6 @@ function isSameDay(iso, ref) {
   return d.toDateString() === ref.toDateString();
 }
 
-// Exact-match lookup used by both the scanner-gun (keyboard wedge) flow and
-// the camera scanner — matches on the printed barcode first, falling back
-// to the internal SKU, since some scanned stock may only have one or the
-// other on file.
-function findProductByCode(inventory, code) {
-  const c = (code || '').trim().toLowerCase();
-  if (!c) return null;
-  return inventory.find((p) => (p.barcode && p.barcode.trim().toLowerCase() === c) || (p.sku && p.sku.trim().toLowerCase() === c)) || null;
-}
-
-// Listens for keystrokes typed extremely fast — the signature of a
-// USB/Bluetooth barcode scanner acting as a keyboard ("HID keyboard
-// wedge") — and reports the completed code, no matter where on the
-// screen focus happens to be. A human typing rarely manages under
-// ~40ms between keystrokes, so that gap is enough to tell a scanner
-// burst apart from someone actually using the keyboard.
-//
-// Deliberately does nothing while an editable field (input, textarea,
-// contenteditable) has focus — those either handle scans themselves
-// already (like the POS search box) or need to receive normal typing
-// untouched. That means a scan only needs to land here when the
-// cashier's focus isn't pinned to a text field, which covers the
-// common case of a scanner gun being used between transactions.
-function useHardwareScanner(onScan, enabled) {
-  const bufferRef = useRef('');
-  const lastKeyTimeRef = useRef(0);
-  const onScanRef = useRef(onScan);
-  onScanRef.current = onScan;
-
-  useEffect(() => {
-    if (!enabled) return;
-    const FAST_KEY_MS = 40;
-    const MIN_CODE_LENGTH = 4;
-
-    const isEditable = (el) => !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
-
-    const handleKeyDown = (e) => {
-      if (isEditable(e.target)) return;
-
-      const now = Date.now();
-      const gap = now - lastKeyTimeRef.current;
-      lastKeyTimeRef.current = now;
-
-      if (e.key === 'Enter') {
-        const code = bufferRef.current;
-        bufferRef.current = '';
-        if (code.length >= MIN_CODE_LENGTH) {
-          e.preventDefault();
-          onScanRef.current(code);
-        }
-        return;
-      }
-
-      if (e.key.length !== 1) return; // ignore Shift, Tab, arrows, F-keys, etc.
-      if (gap > FAST_KEY_MS) bufferRef.current = ''; // too slow — not a scanner burst, start over
-      bufferRef.current += e.key;
-    };
-
-    document.addEventListener('keydown', handleKeyDown, true);
-    return () => document.removeEventListener('keydown', handleKeyDown, true);
-  }, [enabled]);
-}
-
 function csvCell(value) {
   return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
@@ -291,22 +228,67 @@ function exportSalesCsv(salesList, settings) {
 /* Global styles                                                          */
 /* ---------------------------------------------------------------------- */
 
-const STYLES = `
-@import url('https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+// Each theme is just a set of CSS custom-property values plus a heading
+// font. Swapping themes never touches component code — every screen reads
+// colors via var(--pine) etc., so one variable-block swap re-skins the
+// whole app instantly.
+const THEMES = {
+  earthy: {
+    label: 'Earthy',
+    swatch: ['#16423C', '#FBF9F3', '#C97A2B'],
+    vars: {
+      pine: '#16423C', pineLight: '#2F6B57', pinePale: '#E7EEE9',
+      paper: '#FBF9F3', bg: '#EEF1EA', ink: '#202822', muted: '#6B776E', border: '#D9DFD4',
+      amber: '#C97A2B', amberPale: '#FBEEDD', red: '#B23A48', redPale: '#FBE7E8',
+    },
+    fontSerif: "'Zilla Slab', serif",
+    fontImport: "@import url('https://fonts.googleapis.com/css2?family=Zilla+Slab:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');",
+  },
+  clinical: {
+    label: 'Clinical',
+    swatch: ['#0B5394', '#FFFFFF', '#2E7BB8'],
+    vars: {
+      pine: '#0B5394', pineLight: '#2E7BB8', pinePale: '#E5EEF6',
+      paper: '#FFFFFF', bg: '#F1F4F8', ink: '#1A2733', muted: '#64748B', border: '#D7DEE7',
+      amber: '#C97A2B', amberPale: '#FBEEDD', red: '#C0392B', redPale: '#FBE5E3',
+    },
+    fontSerif: "'Inter', sans-serif",
+    fontImport: "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');",
+  },
+  modern: {
+    label: 'Modern',
+    swatch: ['#18181B', '#FFFFFF', '#D97706'],
+    vars: {
+      pine: '#18181B', pineLight: '#3F3F46', pinePale: '#F1F1F3',
+      paper: '#FFFFFF', bg: '#FAFAFA', ink: '#18181B', muted: '#71717A', border: '#E4E4E7',
+      amber: '#D97706', amberPale: '#FEF3E2', red: '#DC2626', redPale: '#FEE2E2',
+    },
+    fontSerif: "'Inter', sans-serif",
+    fontImport: "@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');",
+  },
+};
+const DEFAULT_THEME = 'earthy';
+
+function buildStyles(themeKey) {
+  const t = THEMES[themeKey] || THEMES[DEFAULT_THEME];
+  const v = t.vars;
+  return `
+${t.fontImport}
 
 .pos-root {
-  --pine: #16423C;
-  --pine-light: #2F6B57;
-  --pine-pale: #E7EEE9;
-  --paper: #FBF9F3;
-  --bg: #EEF1EA;
-  --ink: #202822;
-  --muted: #6B776E;
-  --border: #D9DFD4;
-  --amber: #C97A2B;
-  --amber-pale: #FBEEDD;
-  --red: #B23A48;
-  --red-pale: #FBE7E8;
+  --pine: ${v.pine};
+  --pine-light: ${v.pineLight};
+  --pine-pale: ${v.pinePale};
+  --paper: ${v.paper};
+  --bg: ${v.bg};
+  --ink: ${v.ink};
+  --muted: ${v.muted};
+  --border: ${v.border};
+  --amber: ${v.amber};
+  --amber-pale: ${v.amberPale};
+  --red: ${v.red};
+  --red-pale: ${v.redPale};
+  --font-serif: ${t.fontSerif};
   font-family: 'Inter', sans-serif;
   color: var(--ink);
   background: var(--bg);
@@ -315,7 +297,7 @@ const STYLES = `
   box-sizing: border-box;
 }
 .pos-root *, .pos-root *::before, .pos-root *::after { box-sizing: border-box; }
-.pos-serif { font-family: 'Zilla Slab', serif; }
+.pos-serif { font-family: var(--font-serif); }
 .pos-mono { font-family: 'IBM Plex Mono', monospace; }
 .pos-root button { font-family: 'Inter', sans-serif; cursor: pointer; }
 .pos-root input, .pos-root select { font-family: 'Inter', sans-serif; }
@@ -371,7 +353,20 @@ const STYLES = `
   .pos-dash-columns { grid-template-columns: 1fr !important; gap: 20px !important; }
   .pos-inv-toolbar { flex-direction: column !important; align-items: stretch !important; gap: 10px !important; }
 }
+
+/* Printing a receipt: hide everything else on the page, show only the
+   receipt content, full-width, with no shadows/backdrops. */
+@media print {
+  body * { visibility: hidden; }
+  .pos-receipt-print, .pos-receipt-print * { visibility: visible; }
+  .pos-receipt-print {
+    position: fixed; left: 0; top: 0; width: 100% !important; max-width: 100% !important;
+    max-height: none !important; box-shadow: none !important; border-radius: 0 !important;
+  }
+  .pos-no-print { display: none !important; }
+}
 `;
+}
 
 /* ---------------------------------------------------------------------- */
 /* Login                                                                   */
@@ -412,7 +407,7 @@ function LoginScreen({ settings, onLogin, notice }) {
 
   return (
     <div className="pos-root" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh', padding: 24 }}>
-      <style>{STYLES}</style>
+      <style>{buildStyles(settings.theme)}</style>
       <div style={{ width: 360, maxWidth: '100%', background: 'var(--paper)', borderRadius: 16, border: '1px solid var(--border)', padding: '32px 28px', textAlign: 'center' }}>
         <div style={{ width: 52, height: 52, borderRadius: 12, background: 'var(--pine)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
           <Pill size={26} />
@@ -515,20 +510,14 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [inventoryOpen, setInventoryOpen] = useState(false);
-  const [scannerOpen, setScannerOpen] = useState(false);
-  const [scanFlash, setScanFlash] = useState(null);
-  const scanFlashTimer = useRef(null);
 
   const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()) && !s.voided);
   const myTodayRevenue = myTodaySales.reduce((sum, s) => sum + s.total, 0);
 
   const categories = ['All', ...Array.from(new Set(inventory.map((p) => p.category)))];
 
-  useEffect(() => () => clearTimeout(scanFlashTimer.current), []);
-
   const filtered = inventory.filter((p) => {
-    const q = query.toLowerCase();
-    const matchQ = p.name.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q) || (p.barcode || '').toLowerCase().includes(q);
+    const matchQ = p.name.toLowerCase().includes(query.toLowerCase()) || p.sku.toLowerCase().includes(query.toLowerCase());
     const matchC = category === 'All' || p.category === category;
     return matchQ && matchC;
   });
@@ -544,38 +533,6 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       return [...c, { id: product.id, name: product.name, price: product.price, qty: 1, requiresRx: product.requiresRx, maxStock: product.stock }];
     });
   };
-
-  // Handles a scanned code from any source: a USB/Bluetooth scanner gun
-  // (working through the search box, or from anywhere else on this screen
-  // via useHardwareScanner below) or the camera scanner modal. Shows a
-  // brief flash — and a distinct buzz on phones/tablets — so the cashier
-  // gets feedback without needing to look away from the basket.
-  const vibrate = (pattern) => { try { navigator.vibrate && navigator.vibrate(pattern); } catch (e) {} };
-  const flashScan = (type, text) => {
-    setScanFlash({ type, text });
-    vibrate(type === 'success' ? 40 : [40, 60, 40]);
-    clearTimeout(scanFlashTimer.current);
-    scanFlashTimer.current = setTimeout(() => setScanFlash(null), 2200);
-  };
-
-  const handleScanCode = (code) => {
-    const match = findProductByCode(inventory, code);
-    if (!match) {
-      flashScan('error', `No product matches "${code}"`);
-      return;
-    }
-    if (match.stock <= 0) {
-      flashScan('error', `${match.name} is out of stock`);
-      return;
-    }
-    addToCart(match);
-    flashScan('success', `Added ${match.name}`);
-  };
-
-  // A USB/Bluetooth scanner gun works like this anywhere on the sales
-  // screen — not just while the search box is focused — as long as no
-  // other modal (camera scanner, inventory) is already handling scans.
-  useHardwareScanner(handleScanCode, !scannerOpen && !inventoryOpen && !checkoutOpen && !summaryOpen);
 
   const changeQty = (id, delta) => {
     setCart((c) => c.map((i) => {
@@ -619,7 +576,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
 
   return (
     <div className="pos-root" style={{ minHeight: '100vh' }}>
-      <style>{STYLES}</style>
+      <style>{buildStyles(settings.theme)}</style>
       <TopBar settings={settings} user={user} onLogout={onLogout} lastSynced={lastSynced}
         right={<div style={{ fontSize: 12, opacity: 0.85 }}>{cart.length} item{cart.length !== 1 ? 's' : ''} in cart</div>} />
 
@@ -631,30 +588,13 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
               <Search size={16} style={{ position: 'absolute', left: 12, top: 11, color: 'var(--muted)' }} />
               <input
                 value={query} onChange={(e) => setQuery(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key !== 'Enter') return;
-                  const code = query.trim();
-                  if (!code) return;
-                  const exact = findProductByCode(inventory, code);
-                  if (exact) {
-                    e.preventDefault();
-                    handleScanCode(code);
-                    setQuery('');
-                  }
-                }}
-                placeholder="Search, or scan with a barcode gun (works anywhere on this screen)"
+                placeholder="Search by name or SKU"
                 style={{ width: '100%', padding: '10px 12px 10px 34px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}
               />
             </div>
             <select value={category} onChange={(e) => setCategory(e.target.value)} style={{ padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 14 }}>
               {categories.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
-            <button onClick={() => setScannerOpen(true)} title="Scan with camera" style={{
-              display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
-              border: '1px solid var(--border)', background: '#fff', color: 'var(--pine)', fontSize: 13, fontWeight: 600
-            }}>
-              <ScanLine size={15} /> Scan
-            </button>
             {user.canManageInventory && (
               <button onClick={() => setInventoryOpen(true)} style={{
                 display: 'flex', alignItems: 'center', gap: 8, padding: '0 14px', borderRadius: 10,
@@ -788,20 +728,6 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       )}
       {receipt && <ReceiptModal sale={receipt} settings={settings} onClose={() => { setReceipt(null); setCartOpen(false); }} />}
       {summaryOpen && <CashierSummaryModal sales={sales} settings={settings} user={user} onClose={() => setSummaryOpen(false)} voidSale={voidSale} />}
-      {scannerOpen && (
-        <BarcodeScannerModal continuous
-          subtitle="Point the camera at a product barcode. Keep scanning to add more items to the cart."
-          onDetect={handleScanCode} onClose={() => setScannerOpen(false)} />
-      )}
-      {scanFlash && (
-        <div style={{
-          position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 200,
-          background: scanFlash.type === 'success' ? 'var(--pine)' : 'var(--red)', color: '#fff',
-          padding: '10px 18px', borderRadius: 10, fontSize: 13, fontWeight: 600, boxShadow: '0 4px 14px rgba(0,0,0,.18)'
-        }}>
-          {scanFlash.text}
-        </div>
-      )}
       {drugInfoProduct && <DrugInfoModal product={drugInfoProduct} onClose={() => setDrugInfoProduct(null)} />}
       {inventoryOpen && (
         <div style={{ position: 'fixed', inset: 0, background: '#fff', zIndex: 95, overflow: 'auto', padding: 20 }} className="pos-scroll">
@@ -1030,190 +956,6 @@ function DrugInfoModal({ product, onClose }) {
   );
 }
 
-// Camera-based barcode scanner. Loads the decoding library on demand (no
-// point shipping it to every visit) and falls back to a plain text field
-// if the camera can't start — no camera, permission denied, or the library
-// fails to load shouldn't be a dead end.
-//
-// Pass `continuous` to keep the modal open and scanning after each hit
-// (checkout: scan several items in a row); omit it for a single-shot
-// capture that closes itself (e.g. filling in a product's barcode field).
-function BarcodeScannerModal({ onDetect, onClose, continuous, subtitle }) {
-  const videoRef = useRef(null);
-  const controlsRef = useRef(null);
-  const readerRef = useRef(null);
-  const mountedRef = useRef(true);
-  const lastSeenRef = useRef({ code: '', at: 0 });
-  const [status, setStatus] = useState('starting'); // starting | scanning | error
-  const [errorMsg, setErrorMsg] = useState('');
-  const [manualCode, setManualCode] = useState('');
-  const [lastDetected, setLastDetected] = useState(null);
-  const [devices, setDevices] = useState([]);
-  const [deviceIndex, setDeviceIndex] = useState(0);
-  const [torchOn, setTorchOn] = useState(false);
-  const [torchSupported, setTorchSupported] = useState(false);
-
-  const vibrate = (pattern) => { try { navigator.vibrate && navigator.vibrate(pattern); } catch (e) {} };
-
-  const startCamera = async (deviceId) => {
-    setStatus('starting');
-    setErrorMsg('');
-    setTorchSupported(false);
-    setTorchOn(false);
-    try {
-      const zxing = await import('https://esm.sh/@zxing/browser@0.1.5');
-      if (!mountedRef.current) return;
-      if (!readerRef.current) readerRef.current = new zxing.BrowserMultiFormatReader();
-      const reader = readerRef.current;
-
-      if (controlsRef.current) {
-        try { controlsRef.current.stop(); } catch (e) {}
-        controlsRef.current = null;
-      }
-
-      const onResult = (result) => {
-        if (!result) return;
-        const code = result.getText();
-        const now = Date.now();
-        // Ignore the same code re-firing while it's still in frame.
-        if (lastSeenRef.current.code === code && now - lastSeenRef.current.at < 2000) return;
-        lastSeenRef.current = { code, at: now };
-        setLastDetected(code);
-        vibrate(60);
-        onDetect(code);
-      };
-
-      // No specific device yet — default to the rear/environment camera,
-      // which is what you want on a phone or tablet. Once we have a live
-      // stream we can list every camera and let the person switch.
-      const controls = deviceId
-        ? await reader.decodeFromVideoDevice(deviceId, videoRef.current, onResult)
-        : await reader.decodeFromConstraints({ video: { facingMode: { ideal: 'environment' } } }, videoRef.current, onResult);
-
-      if (!mountedRef.current) { try { controls.stop(); } catch (e) {} return; }
-      controlsRef.current = controls;
-      setStatus('scanning');
-
-      try {
-        const inputs = await zxing.BrowserCodeReader.listVideoInputDevices();
-        if (mountedRef.current) setDevices(inputs);
-      } catch (e) { /* device listing is a nice-to-have, not required */ }
-
-      // Torch (flashlight) support varies a lot by device and browser —
-      // only show the toggle when the live stream actually exposes it.
-      try {
-        const stream = videoRef.current && videoRef.current.srcObject;
-        const track = stream && stream.getVideoTracks()[0];
-        const caps = track && track.getCapabilities && track.getCapabilities();
-        if (mountedRef.current) setTorchSupported(!!(caps && caps.torch));
-      } catch (e) { /* ignore — leave torch hidden */ }
-    } catch (err) {
-      if (!mountedRef.current) return;
-      setStatus('error');
-      setErrorMsg(err && err.name === 'NotAllowedError' ? 'Camera access was denied.' : "Couldn't start the camera scanner on this device.");
-    }
-  };
-
-  useEffect(() => {
-    mountedRef.current = true;
-    startCamera(null);
-    return () => {
-      mountedRef.current = false;
-      if (controlsRef.current) {
-        try { controlsRef.current.stop(); } catch (e) {}
-      }
-    };
-  }, []);
-
-  const switchCamera = () => {
-    if (devices.length < 2) return;
-    const nextIndex = (deviceIndex + 1) % devices.length;
-    setDeviceIndex(nextIndex);
-    startCamera(devices[nextIndex].deviceId);
-  };
-
-  const toggleTorch = async () => {
-    if (!controlsRef.current || !controlsRef.current.switchTorch) return;
-    try {
-      await controlsRef.current.switchTorch(!torchOn);
-      setTorchOn((t) => !t);
-    } catch (e) {
-      setTorchSupported(false);
-    }
-  };
-
-  const submitManual = () => {
-    const code = manualCode.trim();
-    if (!code) return;
-    setLastDetected(code);
-    onDetect(code);
-    setManualCode('');
-  };
-
-  return (
-    <div className="pos-modal-backdrop">
-      <div style={{ width: 380, maxWidth: '100%', background: '#fff', borderRadius: 14, padding: 22 }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <span className="pos-serif" style={{ fontSize: 16, fontWeight: 700 }}>Scan barcode</span>
-          <button onClick={onClose} style={{ background: 'none', border: 'none' }}><X size={18} /></button>
-        </div>
-        {subtitle && <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: -4, marginBottom: 12 }}>{subtitle}</p>}
-
-        {status !== 'error' && (
-          <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#000', marginBottom: 8 }}>
-            <video ref={videoRef} style={{ width: '100%', display: 'block', maxHeight: 240, objectFit: 'cover' }} muted playsInline />
-            {status === 'starting' && (
-              <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 12 }}>
-                Starting camera…
-              </div>
-            )}
-            {status === 'scanning' && (devices.length > 1 || torchSupported) && (
-              <div style={{ position: 'absolute', top: 8, right: 8, display: 'flex', gap: 6 }}>
-                {devices.length > 1 && (
-                  <button onClick={switchCamera} title="Switch camera" style={{
-                    background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 600
-                  }}>⟳ Switch camera</button>
-                )}
-                {torchSupported && (
-                  <button onClick={toggleTorch} title="Toggle flashlight" style={{
-                    background: torchOn ? 'var(--pine)' : 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 8, padding: '6px 10px', fontSize: 11, fontWeight: 600
-                  }}>💡 {torchOn ? 'On' : 'Off'}</button>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {status === 'error' && (
-          <div style={{ background: 'var(--amber-pale)', color: '#5C3A12', borderRadius: 8, padding: 10, fontSize: 12, marginBottom: 12 }}>
-            {errorMsg} You can still type the code below — or use a USB/Bluetooth scanner gun, which works anywhere on the sales screen.
-          </div>
-        )}
-
-        {status === 'scanning' && (
-          <p style={{ fontSize: 11, color: 'var(--muted)', marginBottom: 12 }}>Hold the barcode steady a few inches from the camera, inside good light.</p>
-        )}
-
-        {lastDetected && (
-          <div style={{ fontSize: 12, color: 'var(--pine)', marginBottom: 10 }}>Last scanned: <span className="pos-mono">{lastDetected}</span></div>
-        )}
-
-        <div style={{ display: 'flex', gap: 8 }}>
-          <input value={manualCode} onChange={(e) => setManualCode(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && submitManual()}
-            placeholder="Or type the code" style={{ flex: 1, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
-          <button onClick={submitManual} style={{ padding: '9px 14px', borderRadius: 8, border: 'none', background: 'var(--pine)', color: '#fff', fontSize: 13, fontWeight: 600 }}>Use</button>
-        </div>
-
-        {continuous && (
-          <button onClick={onClose} style={{ width: '100%', marginTop: 14, padding: '10px 0', borderRadius: 10, border: '1px solid var(--border)', background: '#fff', fontSize: 13, fontWeight: 600 }}>
-            Done scanning
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComplete }) {
   const [method, setMethod] = useState('cash');
   const [tendered, setTendered] = useState('');
@@ -1410,7 +1152,7 @@ function CheckoutModal({ cart, subtotal, tax, total, settings, onClose, onComple
 function ReceiptModal({ sale, settings, onClose }) {
   return (
     <div className="pos-modal-backdrop">
-      <div className="pos-mono" style={{ width: 320, maxWidth: '100%', background: '#fff', borderRadius: 4, padding: '22px 20px', fontSize: 12.5, maxHeight: '90vh', overflowY: 'auto' }}>
+      <div className="pos-mono pos-receipt-print" style={{ width: 320, maxWidth: '100%', background: '#fff', borderRadius: 4, padding: '22px 20px', fontSize: 12.5, maxHeight: '90vh', overflowY: 'auto' }}>
         <div style={{ textAlign: 'center', marginBottom: 12 }}>
           <CheckCircle size={28} color="var(--pine)" style={{ marginBottom: 6 }} />
           <div className="pos-serif" style={{ fontSize: 16, fontWeight: 700 }}>{settings.pharmacyName}</div>
@@ -1442,7 +1184,12 @@ function ReceiptModal({ sale, settings, onClose }) {
           </>
         )}
         <div style={{ textAlign: 'center', color: 'var(--muted)', marginTop: 12 }}>Thank you — get well soon</div>
-        <button onClick={onClose} style={{ width: '100%', marginTop: 16, padding: '10px 0', borderRadius: 8, border: 'none', background: 'var(--pine)', color: '#fff', fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>New sale</button>
+        <div className="pos-no-print" style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+          <button onClick={() => window.print()} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: '1px solid var(--pine)', background: '#fff', color: 'var(--pine)', fontWeight: 600, fontFamily: 'Inter, sans-serif', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+            <Printer size={14} /> Print
+          </button>
+          <button onClick={onClose} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: 'none', background: 'var(--pine)', color: '#fff', fontWeight: 600, fontFamily: 'Inter, sans-serif' }}>New sale</button>
+        </div>
       </div>
     </div>
   );
@@ -1457,7 +1204,6 @@ function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, l
   const [tab, setTab] = useState('dashboard');
   const navItems = [
     { key: 'dashboard', label: 'Dashboard', Icon: LayoutDashboard },
-    { key: 'analytics', label: 'Analytics', Icon: TrendingUp },
     { key: 'inventory', label: 'Inventory', Icon: Package },
     { key: 'activity', label: 'Activity', Icon: Receipt },
     { key: 'sales', label: 'Sales history', Icon: ClipboardList },
@@ -1468,7 +1214,7 @@ function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, l
 
   return (
     <div className="pos-root" style={{ minHeight: '100vh' }}>
-      <style>{STYLES}</style>
+      <style>{buildStyles(settings.theme)}</style>
       <TopBar settings={settings} user={user} onLogout={onLogout} lastSynced={lastSynced} right={null} />
       <div className="pos-admin-layout">
         <div className="pos-admin-nav">
@@ -1482,7 +1228,6 @@ function AdminConsole({ inventory, sales, staffList, settings, user, onLogout, l
         </div>
         <div className="pos-admin-content pos-scroll">
           {tab === 'dashboard' && <DashboardTab inventory={inventory} sales={sales} settings={settings} />}
-          {tab === 'analytics' && <AnalyticsTab inventory={inventory} sales={sales} settings={settings} />}
           {tab === 'inventory' && <InventoryTab inventory={inventory} settings={settings} saveInventory={saveInventory} user={user} logInventoryChange={logInventoryChange} />}
           {tab === 'activity' && <ActivityTab inventoryLog={inventoryLog} />}
           {tab === 'sales' && <SalesTab sales={sales} settings={settings} voidSale={voidSale} />}
@@ -1630,411 +1375,7 @@ function DashboardTab({ inventory, sales, settings }) {
   );
 }
 
-/* ---------------------------------------------------------------------- */
-/* Advanced analytics                                                     */
-/* ---------------------------------------------------------------------- */
-
-const ANALYTICS_PERIODS = [
-  { days: 30, label: '30 days' },
-  { days: 90, label: '90 days' },
-  { days: 180, label: '180 days' },
-  { days: 365, label: '365 days' },
-];
-
-// Aggregates completed (non-voided) sales from the last `periodDays` into
-// per-product totals — units sold, revenue, and an estimated cost of goods
-// sold. Cost is based on each product's *current* cost price, since sale
-// records only ever stored the selling price, not what it cost at the time
-// — close enough for trend analysis, but not a substitute for real
-// landed-cost accounting. Every product in inventory is included even with
-// zero sales, so dead stock is visible everywhere it should be.
-function buildProductSalesStats(inventory, sales, periodDays) {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - periodDays);
-
-  const stats = new Map();
-  inventory.forEach((p) => {
-    stats.set(p.id, { product: p, unitsSold: 0, revenue: 0, cost: 0 });
-  });
-
-  sales.forEach((s) => {
-    if (s.voided || new Date(s.timestamp) < cutoff) return;
-    (s.items || []).forEach((item) => {
-      let entry = stats.get(item.id);
-      if (!entry) {
-        // Product has since been deleted from inventory — still counts
-        // toward historical revenue, it just has no live stock to compare.
-        entry = { product: { id: item.id, name: item.name, category: 'Discontinued', costPrice: 0, stock: 0, reorderLevel: 0 }, unitsSold: 0, revenue: 0, cost: 0 };
-        stats.set(item.id, entry);
-      }
-      entry.unitsSold += item.qty;
-      entry.revenue += item.price * item.qty;
-      entry.cost += (Number(entry.product.costPrice) || 0) * item.qty;
-    });
-  });
-
-  return Array.from(stats.values());
-}
-
-function PeriodPicker({ periodDays, setPeriodDays }) {
-  return (
-    <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
-      {ANALYTICS_PERIODS.map((p) => (
-        <button key={p.days} onClick={() => setPeriodDays(p.days)} style={{
-          padding: '6px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-          border: '1px solid var(--border)', background: periodDays === p.days ? 'var(--pine)' : '#fff',
-          color: periodDays === p.days ? '#fff' : 'var(--muted)',
-        }}>{p.label}</button>
-      ))}
-    </div>
-  );
-}
-
-function AnalyticsCard({ title, subtitle, children }) {
-  return (
-    <div style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12, padding: 18, marginBottom: 20 }}>
-      <h3 className="pos-serif" style={{ fontSize: 16, fontWeight: 700, marginBottom: subtitle ? 2 : 12 }}>{title}</h3>
-      {subtitle && <p style={{ fontSize: 12, color: 'var(--muted)', marginBottom: 14 }}>{subtitle}</p>}
-      {children}
-    </div>
-  );
-}
-
-const badgeStyle = (color, bg) => ({
-  display: 'inline-block', fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 20, color, background: bg,
-});
-
-/* ----- Inventory turnover ------------------------------------------- */
-
-function TurnoverSection({ inventory, sales, periodDays }) {
-  const rows = useMemo(() => {
-    const stats = buildProductSalesStats(inventory, sales, periodDays).filter((r) => r.product.category !== 'Discontinued');
-    return stats.map((r) => {
-      const stock = Math.max(0, Number(r.product.stock) || 0);
-      const dailyRate = r.unitsSold / periodDays;
-      // Turnover rate = units sold / average inventory on hand, annualized.
-      // We don't keep historical stock snapshots, so current stock stands
-      // in for average inventory — a standard approximation for POS systems
-      // without a dedicated inventory-valuation ledger.
-      const annualTurns = stock > 0 ? (dailyRate * 365) / stock : (r.unitsSold > 0 ? Infinity : 0);
-      const daysOfStock = dailyRate > 0 ? stock / dailyRate : null;
-      let status = 'No sales';
-      if (r.unitsSold > 0) status = annualTurns >= 12 ? 'Fast-moving' : annualTurns >= 3 ? 'Normal' : 'Slow-moving';
-      else if (stock > 0) status = 'Dead stock';
-      return { ...r, stock, annualTurns, daysOfStock, status };
-    }).sort((a, b) => b.annualTurns - a.annualTurns);
-  }, [inventory, sales, periodDays]);
-
-  const STATUS_META = {
-    'Fast-moving': badgeStyle('#fff', 'var(--pine)'),
-    'Normal': badgeStyle('var(--ink)', 'var(--bg)'),
-    'Slow-moving': badgeStyle('#8A5A00', 'var(--amber-pale)'),
-    'Dead stock': badgeStyle('var(--red)', 'var(--red-pale)'),
-    'No sales': badgeStyle('var(--muted)', 'var(--bg)'),
-  };
-
-  return (
-    <AnalyticsCard title="Inventory turnover rate" subtitle="How many times each product's stock would cycle in a year, based on units sold in the selected period vs. current stock on hand.">
-      <div className="pos-table-scroll" style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
-        <div style={{ minWidth: 640 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 0.8fr 0.8fr 1fr 1.1fr', padding: '9px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-            <span>Product</span><span>Category</span><span>Units sold</span><span>Stock</span><span>Turnover/yr</span><span>Status</span>
-          </div>
-          {rows.length === 0 && <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)' }}>No products to analyze.</p>}
-          {rows.map((r) => (
-            <div key={r.product.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 0.8fr 0.8fr 1fr 1.1fr', padding: '9px 14px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-              <span>{r.product.name}</span>
-              <span style={{ color: 'var(--muted)', fontSize: 12 }}>{r.product.category}</span>
-              <span className="pos-mono">{r.unitsSold}</span>
-              <span className="pos-mono">{r.stock}</span>
-              <span className="pos-mono">{!isFinite(r.annualTurns) ? 'Sold out' : r.annualTurns.toFixed(1) + 'x'}</span>
-              <span style={badgeStyle(STATUS_META[r.status].color, STATUS_META[r.status].background)}>{r.status}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </AnalyticsCard>
-  );
-}
-
-/* ----- ABC analysis --------------------------------------------------- */
-
-function classifyABC(rows) {
-  const total = rows.reduce((s, r) => s + r.revenue, 0);
-  let cumulative = 0;
-  return rows.map((r) => {
-    cumulative += r.revenue;
-    const cumulativePct = total > 0 ? (cumulative / total) * 100 : 100;
-    const revenueSharePct = total > 0 ? (r.revenue / total) * 100 : 0;
-    const cls = cumulativePct <= 80 ? 'A' : cumulativePct <= 95 ? 'B' : 'C';
-    return { ...r, cumulativePct, revenueSharePct, class: cls };
-  });
-}
-
-function ABCSection({ inventory, sales, settings, periodDays }) {
-  const [filter, setFilter] = useState('All');
-  const ranked = useMemo(() => {
-    const stats = buildProductSalesStats(inventory, sales, periodDays).filter((r) => r.revenue > 0);
-    stats.sort((a, b) => b.revenue - a.revenue);
-    return classifyABC(stats);
-  }, [inventory, sales, periodDays]);
-
-  const summary = ['A', 'B', 'C'].map((cls) => {
-    const items = ranked.filter((r) => r.class === cls);
-    return {
-      cls,
-      count: items.length,
-      revenue: items.reduce((s, r) => s + r.revenue, 0),
-      revenuePct: items.reduce((s, r) => s + r.revenueSharePct, 0),
-    };
-  });
-
-  const CLASS_META = {
-    A: { label: 'A — top priority', color: '#fff', bg: 'var(--pine)' },
-    B: { label: 'B — moderate priority', color: '#8A5A00', bg: 'var(--amber-pale)' },
-    C: { label: 'C — low priority', color: 'var(--muted)', bg: 'var(--bg)' },
-  };
-
-  const visible = filter === 'All' ? ranked : ranked.filter((r) => r.class === filter);
-
-  return (
-    <AnalyticsCard title="ABC inventory analysis" subtitle="Products ranked by revenue contribution in the selected period. A = top ~80% of revenue, B = next ~15%, C = the long tail.">
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10, marginBottom: 16 }}>
-        {summary.map((s) => (
-          <div key={s.cls} style={{ border: '1px solid var(--border)', borderRadius: 10, padding: 12 }}>
-            <span style={badgeStyle(CLASS_META[s.cls].color, CLASS_META[s.cls].bg)}>{CLASS_META[s.cls].label}</span>
-            <div className="pos-mono" style={{ fontSize: 18, fontWeight: 700, marginTop: 8 }}>{s.count} products</div>
-            <div style={{ fontSize: 12, color: 'var(--muted)' }}>{s.revenuePct.toFixed(1)}% of revenue · {formatMoney(s.revenue, settings.currency)}</div>
-          </div>
-        ))}
-      </div>
-
-      <div style={{ display: 'flex', gap: 6, marginBottom: 12 }}>
-        {['All', 'A', 'B', 'C'].map((f) => (
-          <button key={f} onClick={() => setFilter(f)} style={{
-            padding: '5px 12px', borderRadius: 20, fontSize: 12, fontWeight: 600, cursor: 'pointer',
-            border: '1px solid var(--border)', background: filter === f ? 'var(--pine)' : '#fff', color: filter === f ? '#fff' : 'var(--muted)',
-          }}>{f}</button>
-        ))}
-      </div>
-
-      <div className="pos-table-scroll" style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
-        <div style={{ minWidth: 640 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '0.4fr 2fr 1fr 1fr 1fr 1fr 0.6fr', padding: '9px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-            <span>#</span><span>Product</span><span>Category</span><span>Revenue</span><span>% of total</span><span>Cumulative</span><span>Class</span>
-          </div>
-          {visible.length === 0 && <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)' }}>No sales revenue in this period yet.</p>}
-          {visible.map((r, i) => (
-            <div key={r.product.id} style={{ display: 'grid', gridTemplateColumns: '0.4fr 2fr 1fr 1fr 1fr 1fr 0.6fr', padding: '9px 14px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-              <span className="pos-mono" style={{ color: 'var(--muted)' }}>{ranked.indexOf(r) + 1}</span>
-              <span>{r.product.name}</span>
-              <span style={{ color: 'var(--muted)', fontSize: 12 }}>{r.product.category}</span>
-              <span className="pos-mono">{formatMoney(r.revenue, settings.currency)}</span>
-              <span className="pos-mono">{r.revenueSharePct.toFixed(1)}%</span>
-              <span className="pos-mono">{r.cumulativePct.toFixed(1)}%</span>
-              <span style={badgeStyle(CLASS_META[r.class].color, CLASS_META[r.class].bg)}>{r.class}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </AnalyticsCard>
-  );
-}
-
-/* ----- Gross margin ---------------------------------------------------- */
-
-function MarginSection({ inventory, sales, settings, periodDays }) {
-  const missingCostCount = inventory.filter((p) => !(Number(p.costPrice) > 0)).length;
-
-  const productRows = useMemo(() => {
-    return buildProductSalesStats(inventory, sales, periodDays)
-      .filter((r) => r.product.category !== 'Discontinued' && r.revenue > 0)
-      .map((r) => {
-        const hasCost = Number(r.product.costPrice) > 0;
-        const margin = r.revenue - r.cost;
-        const marginPct = hasCost && r.revenue > 0 ? (margin / r.revenue) * 100 : null;
-        return { ...r, hasCost, margin, marginPct };
-      })
-      .sort((a, b) => b.revenue - a.revenue);
-  }, [inventory, sales, periodDays]);
-
-  const categoryRows = useMemo(() => {
-    const map = new Map();
-    productRows.forEach((r) => {
-      const cat = r.product.category || 'Uncategorized';
-      if (!map.has(cat)) map.set(cat, { category: cat, revenue: 0, cost: 0, missingCost: false });
-      const c = map.get(cat);
-      c.revenue += r.revenue;
-      if (r.hasCost) c.cost += r.cost; else c.missingCost = true;
-    });
-    return Array.from(map.values()).map((c) => ({
-      ...c, margin: c.revenue - c.cost, marginPct: c.revenue > 0 ? ((c.revenue - c.cost) / c.revenue) * 100 : null,
-    })).sort((a, b) => b.revenue - a.revenue);
-  }, [productRows]);
-
-  const marginColor = (pct) => {
-    if (pct === null) return 'var(--muted)';
-    if (pct < 15) return 'var(--red)';
-    if (pct < 30) return '#8A5A00';
-    return 'var(--pine)';
-  };
-
-  return (
-    <AnalyticsCard title="Gross margin by product & category" subtitle="Revenue minus cost of goods sold, for the selected period. Set a cost price on a product (Inventory → edit) to include it in margin figures.">
-      {missingCostCount > 0 && (
-        <div style={{ background: 'var(--amber-pale)', color: '#8A5A00', borderRadius: 8, padding: '8px 12px', fontSize: 12, marginBottom: 14 }}>
-          {missingCostCount} product{missingCostCount !== 1 ? 's have' : ' has'} no cost price set, so their margin can't be calculated yet — figures below only reflect products with a cost price on file.
-        </div>
-      )}
-
-      <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>By category</h4>
-      <div style={{ marginBottom: 18 }}>
-        {categoryRows.length === 0 && <p style={{ fontSize: 13, color: 'var(--muted)' }}>No sales revenue in this period yet.</p>}
-        {categoryRows.map((c) => (
-          <div key={c.category} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 13, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
-            <span>{c.category}{c.missingCost ? <span style={{ color: 'var(--muted)', fontSize: 11 }}> *</span> : ''}</span>
-            <span style={{ display: 'flex', gap: 14, alignItems: 'center' }}>
-              <span className="pos-mono" style={{ color: 'var(--muted)' }}>{formatMoney(c.revenue, settings.currency)}</span>
-              <span className="pos-mono" style={{ fontWeight: 700, color: marginColor(c.marginPct) }}>
-                {c.marginPct === null ? '—' : `${c.marginPct.toFixed(1)}%`}
-              </span>
-            </span>
-          </div>
-        ))}
-        {categoryRows.some((c) => c.missingCost) && <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>* includes at least one product with no cost price — actual margin is likely lower than shown.</p>}
-      </div>
-
-      <h4 style={{ fontSize: 13, fontWeight: 700, marginBottom: 8 }}>By product</h4>
-      <div className="pos-table-scroll" style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
-        <div style={{ minWidth: 640 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', padding: '9px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-            <span>Product</span><span>Revenue</span><span>Cost</span><span>Margin</span><span>Margin %</span>
-          </div>
-          {productRows.length === 0 && <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)' }}>No sales revenue in this period yet.</p>}
-          {productRows.map((r) => (
-            <div key={r.product.id} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 1fr 1fr', padding: '9px 14px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-              <span>{r.product.name}</span>
-              <span className="pos-mono">{formatMoney(r.revenue, settings.currency)}</span>
-              <span className="pos-mono">{r.hasCost ? formatMoney(r.cost, settings.currency) : '—'}</span>
-              <span className="pos-mono">{r.hasCost ? formatMoney(r.margin, settings.currency) : '—'}</span>
-              <span className="pos-mono" style={{ fontWeight: 700, color: marginColor(r.marginPct) }}>{r.marginPct === null ? '—' : `${r.marginPct.toFixed(1)}%`}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </AnalyticsCard>
-  );
-}
-
-/* ----- Predictive stock forecasting ------------------------------------ */
-
-function ForecastSection({ inventory, sales, settings }) {
-  const LEAD_TIME_DAYS = 14;
-
-  const rows = useMemo(() => {
-    const now = new Date();
-    const recentCutoff = new Date(now); recentCutoff.setDate(now.getDate() - 14);
-    const priorCutoff = new Date(now); priorCutoff.setDate(now.getDate() - 28);
-
-    const recentQty = new Map();
-    const priorQty = new Map();
-    sales.forEach((s) => {
-      if (s.voided) return;
-      const t = new Date(s.timestamp);
-      if (t >= recentCutoff) {
-        (s.items || []).forEach((i) => recentQty.set(i.id, (recentQty.get(i.id) || 0) + i.qty));
-      } else if (t >= priorCutoff) {
-        (s.items || []).forEach((i) => priorQty.set(i.id, (priorQty.get(i.id) || 0) + i.qty));
-      }
-    });
-
-    return inventory.map((p) => {
-      const recent = recentQty.get(p.id) || 0;
-      const prior = priorQty.get(p.id) || 0;
-      const recentDaily = recent / 14;
-      const priorDaily = prior / 14;
-      // Weight the recent window more heavily so the forecast reacts to
-      // fresh trends, but still smooths out single-week noise.
-      const projectedDaily = priorDaily > 0 ? recentDaily * 0.7 + priorDaily * 0.3 : recentDaily;
-
-      let trend = 'steady';
-      if (recentDaily > priorDaily * 1.2 + 0.01) trend = 'rising';
-      else if (recentDaily < priorDaily * 0.8 - 0.01) trend = 'falling';
-
-      const stock = Math.max(0, Number(p.stock) || 0);
-      const daysOfStock = projectedDaily > 0 ? stock / projectedDaily : null;
-      const projectedNeed = projectedDaily * LEAD_TIME_DAYS;
-      const suggestedReorder = Math.max(0, Math.ceil(projectedNeed - stock));
-
-      let urgency = 'ok';
-      if (projectedDaily > 0 && daysOfStock <= 7) urgency = 'urgent';
-      else if (projectedDaily > 0 && daysOfStock <= LEAD_TIME_DAYS) urgency = 'soon';
-      else if (projectedDaily === 0 && stock <= (Number(p.reorderLevel) || 0)) urgency = 'watch';
-
-      return { product: p, stock, recent, prior, projectedDaily, trend, daysOfStock, suggestedReorder, urgency };
-    })
-      .filter((r) => r.recent > 0 || r.prior > 0 || r.stock <= (Number(r.product.reorderLevel) || 0))
-      .sort((a, b) => (a.daysOfStock ?? Infinity) - (b.daysOfStock ?? Infinity));
-  }, [inventory, sales]);
-
-  const TREND_META = {
-    rising: { symbol: '↑', color: '#8A5A00' },
-    falling: { symbol: '↓', color: 'var(--muted)' },
-    steady: { symbol: '→', color: 'var(--muted)' },
-  };
-  const URGENCY_META = {
-    urgent: badgeStyle('#fff', 'var(--red)'),
-    soon: badgeStyle('#8A5A00', 'var(--amber-pale)'),
-    watch: badgeStyle('var(--muted)', 'var(--bg)'),
-    ok: badgeStyle('#fff', 'var(--pine)'),
-  };
-  const URGENCY_LABEL = { urgent: 'Reorder now', soon: 'Reorder soon', watch: 'Watch', ok: 'Healthy' };
-
-  return (
-    <AnalyticsCard title="Predictive stock forecasting" subtitle={`Projects daily demand from the last 28 days of sales (weighted toward the most recent 14) and estimates when each product runs out, assuming a ${LEAD_TIME_DAYS}-day supplier lead time.`}>
-      <div className="pos-table-scroll" style={{ border: '1px solid var(--border)', borderRadius: 10 }}>
-        <div style={{ minWidth: 700 }}>
-          <div style={{ display: 'grid', gridTemplateColumns: '2fr 0.9fr 0.9fr 1fr 1fr 1.1fr 1fr', padding: '9px 14px', fontSize: 11, textTransform: 'uppercase', letterSpacing: 0.5, color: 'var(--muted)', borderBottom: '1px solid var(--border)' }}>
-            <span>Product</span><span>Stock</span><span>Trend</span><span>Daily demand</span><span>Days left</span><span>Suggested reorder</span><span>Status</span>
-          </div>
-          {rows.length === 0 && <p style={{ padding: 14, fontSize: 13, color: 'var(--muted)' }}>No recent sales activity or low-stock items to forecast yet.</p>}
-          {rows.map((r) => (
-            <div key={r.product.id} style={{ display: 'grid', gridTemplateColumns: '2fr 0.9fr 0.9fr 1fr 1fr 1.1fr 1fr', padding: '9px 14px', fontSize: 13, borderBottom: '1px solid var(--border)', alignItems: 'center' }}>
-              <span>{r.product.name}</span>
-              <span className="pos-mono">{r.stock}</span>
-              <span style={{ color: TREND_META[r.trend].color, fontWeight: 700 }}>{TREND_META[r.trend].symbol} {r.trend}</span>
-              <span className="pos-mono">{r.projectedDaily.toFixed(2)}/day</span>
-              <span className="pos-mono">{r.daysOfStock === null ? '—' : Math.round(r.daysOfStock) + 'd'}</span>
-              <span className="pos-mono">{r.suggestedReorder > 0 ? `+${r.suggestedReorder}` : '—'}</span>
-              <span style={badgeStyle(URGENCY_META[r.urgency].color, URGENCY_META[r.urgency].background)}>{URGENCY_LABEL[r.urgency]}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </AnalyticsCard>
-  );
-}
-
-/* ----- Tab shell -------------------------------------------------------- */
-
-function AnalyticsTab({ inventory, sales, settings }) {
-  const [periodDays, setPeriodDays] = useState(90);
-
-  return (
-    <div>
-      <h2 className="pos-serif" style={{ fontSize: 20, fontWeight: 700, marginBottom: 4 }}>Advanced analytics</h2>
-      <p style={{ fontSize: 13, color: 'var(--muted)', marginBottom: 6 }}>Turnover, ABC ranking, and margin below use the period selected here. Forecasting always looks at the last 28 days.</p>
-      <PeriodPicker periodDays={periodDays} setPeriodDays={setPeriodDays} />
-
-      <TurnoverSection inventory={inventory} sales={sales} periodDays={periodDays} />
-      <ABCSection inventory={inventory} sales={sales} settings={settings} periodDays={periodDays} />
-      <MarginSection inventory={inventory} sales={sales} settings={settings} periodDays={periodDays} />
-      <ForecastSection inventory={inventory} sales={sales} settings={settings} />
-    </div>
-  );
-}
-
-const emptyProduct = { name: '', category: '', sku: '', barcode: '', price: '', costPrice: '', stock: '', reorderLevel: '', expiry: '', requiresRx: false };
+const emptyProduct = { name: '', category: '', sku: '', price: '', stock: '', reorderLevel: '', expiry: '', requiresRx: false };
 
 // Builds a short, human-readable summary of what changed between two
 // versions of a product — e.g. "Stock 40 → 60, Price KSh180 → KSh190".
@@ -2044,13 +1385,11 @@ function summarizeProductChange(before, after, settings) {
   const parts = [];
   if (before.name !== after.name) parts.push(`Name "${before.name}" → "${after.name}"`);
   if (Number(before.price) !== Number(after.price)) parts.push(`Price ${formatMoney(before.price, settings.currency)} → ${formatMoney(after.price, settings.currency)}`);
-  if (Number(before.costPrice || 0) !== Number(after.costPrice || 0)) parts.push(`Cost price ${formatMoney(before.costPrice || 0, settings.currency)} → ${formatMoney(after.costPrice || 0, settings.currency)}`);
   if (Number(before.stock) !== Number(after.stock)) parts.push(`Stock ${before.stock} → ${after.stock}`);
   if (Number(before.reorderLevel) !== Number(after.reorderLevel)) parts.push(`Reorder level ${before.reorderLevel} → ${after.reorderLevel}`);
   if (before.expiry !== after.expiry) parts.push(`Expiry ${before.expiry || '—'} → ${after.expiry || '—'}`);
   if (before.category !== after.category) parts.push(`Category ${before.category} → ${after.category}`);
   if (before.sku !== after.sku) parts.push(`SKU ${before.sku} → ${after.sku}`);
-  if ((before.barcode || '') !== (after.barcode || '')) parts.push(`Barcode ${before.barcode || '—'} → ${after.barcode || '—'}`);
   if (!!before.requiresRx !== !!after.requiresRx) parts.push(after.requiresRx ? 'Marked as Rx' : 'Unmarked as Rx');
   return parts.length ? parts.join(', ') : 'No field changes';
 }
@@ -2060,7 +1399,7 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
   const [drugInfoProduct, setDrugInfoProduct] = useState(null);
   const [query, setQuery] = useState('');
 
-  const filtered = inventory.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || p.sku.toLowerCase().includes(query.toLowerCase()) || (p.barcode || '').toLowerCase().includes(query.toLowerCase()));
+  const filtered = inventory.filter((p) => p.name.toLowerCase().includes(query.toLowerCase()) || p.sku.toLowerCase().includes(query.toLowerCase()));
 
   const upsert = (product) => {
     if (product.id) {
@@ -2110,7 +1449,7 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
           <Plus size={14} /> Add product
         </button>
       </div>
-      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search inventory by name, SKU, or barcode"
+      <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search inventory"
         style={{ width: '100%', maxWidth: 320, padding: '9px 12px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginBottom: 14 }} />
 
       <div className="pos-table-scroll" style={{ background: 'var(--paper)', border: '1px solid var(--border)', borderRadius: 12 }}>
@@ -2148,13 +1487,8 @@ function InventoryTab({ inventory, settings, saveInventory, user, logInventoryCh
 
 function ProductModal({ product, onClose, onSave }) {
   const [form, setForm] = useState({ ...product });
-  const [scannerOpen, setScannerOpen] = useState(false);
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
   const valid = form.name && form.category && form.sku && form.price !== '' && form.stock !== '';
-
-  // Lets a hardware scanner gun fill the barcode field even if focus
-  // isn't sitting in that input (e.g. admin just clicked into the modal).
-  useHardwareScanner((code) => set('barcode', code), !scannerOpen);
 
   return (
     <div className="pos-modal-backdrop">
@@ -2165,8 +1499,7 @@ function ProductModal({ product, onClose, onSave }) {
         </div>
         {[
           ['name', 'Product name', 'text'], ['category', 'Category', 'text'], ['sku', 'SKU', 'text'],
-          ['price', 'Selling price', 'number'], ['costPrice', 'Cost price (optional — powers margin analytics)', 'number'],
-          ['stock', 'Stock quantity', 'number'], ['reorderLevel', 'Reorder level', 'number'], ['expiry', 'Expiry date', 'date'],
+          ['price', 'Price', 'number'], ['stock', 'Stock quantity', 'number'], ['reorderLevel', 'Reorder level', 'number'], ['expiry', 'Expiry date', 'date'],
         ].map(([key, label, type]) => (
           <div key={key} style={{ marginBottom: 10 }}>
             <label style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</label>
@@ -2174,32 +1507,14 @@ function ProductModal({ product, onClose, onSave }) {
               style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginTop: 3 }} />
           </div>
         ))}
-        <div style={{ marginBottom: 10 }}>
-          <label style={{ fontSize: 12, color: 'var(--muted)' }}>Barcode (printed on packaging, optional)</label>
-          <div style={{ display: 'flex', gap: 8, marginTop: 3 }}>
-            <input value={form.barcode || ''} onChange={(e) => set('barcode', e.target.value)}
-              style={{ flex: 1, padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13 }} />
-            <button type="button" onClick={() => setScannerOpen(true)} title="Scan with camera" style={{
-              display: 'flex', alignItems: 'center', gap: 6, padding: '0 12px', borderRadius: 8, border: '1px solid var(--border)', background: '#fff', color: 'var(--pine)'
-            }}>
-              <ScanLine size={15} />
-            </button>
-          </div>
-        </div>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, marginBottom: 16 }}>
           <input type="checkbox" checked={form.requiresRx} onChange={(e) => set('requiresRx', e.target.checked)} /> Requires a prescription
         </label>
-        <button disabled={!valid} onClick={() => onSave({ ...form, price: parseFloat(form.price) || 0, costPrice: parseFloat(form.costPrice) || 0, stock: parseInt(form.stock) || 0, reorderLevel: parseInt(form.reorderLevel) || 0 })}
+        <button disabled={!valid} onClick={() => onSave({ ...form, price: parseFloat(form.price) || 0, stock: parseInt(form.stock) || 0, reorderLevel: parseInt(form.reorderLevel) || 0 })}
           style={{ width: '100%', padding: '11px 0', borderRadius: 10, border: 'none', background: valid ? 'var(--pine)' : '#B9C4B4', color: '#fff', fontWeight: 600 }}>
           Save product
         </button>
       </div>
-      {scannerOpen && (
-        <BarcodeScannerModal
-          subtitle="Scan the barcode printed on the product packaging."
-          onDetect={(code) => { set('barcode', code); setScannerOpen(false); }}
-          onClose={() => setScannerOpen(false)} />
-      )}
     </div>
   );
 }
@@ -2592,6 +1907,26 @@ function SettingsTab({ settings, saveSettings }) {
           <input type="number" min="0" value={form.sessionTimeoutMinutes} onChange={(e) => setForm({ ...form, sessionTimeoutMinutes: parseInt(e.target.value) || 0 })} style={{ width: '100%', padding: '9px 10px', borderRadius: 8, border: '1px solid var(--border)', fontSize: 13, marginTop: 3 }} />
           <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 4 }}>Cashiers and admins are logged out after this many minutes with no activity on a terminal. Set to 0 to disable.</p>
         </div>
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ fontSize: 12, color: 'var(--muted)' }}>Theme</label>
+          <div style={{ display: 'flex', gap: 10, marginTop: 6, flexWrap: 'wrap' }}>
+            {Object.entries(THEMES).map(([key, t]) => (
+              <button key={key} type="button" onClick={() => setForm({ ...form, theme: key })} style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, padding: '10px 12px',
+                borderRadius: 10, border: (form.theme || DEFAULT_THEME) === key ? '2px solid var(--pine)' : '1px solid var(--border)',
+                background: '#fff', minWidth: 78
+              }}>
+                <div style={{ display: 'flex', gap: 3 }}>
+                  {t.swatch.map((c, i) => (
+                    <span key={i} style={{ width: 14, height: 14, borderRadius: '50%', background: c, border: '1px solid rgba(0,0,0,0.08)' }} />
+                  ))}
+                </div>
+                <span style={{ fontSize: 11.5, fontWeight: (form.theme || DEFAULT_THEME) === key ? 700 : 500 }}>{t.label}</span>
+              </button>
+            ))}
+          </div>
+          <p style={{ fontSize: 11, color: 'var(--muted)', marginTop: 6 }}>Applies to every screen and every till once saved.</p>
+        </div>
         <button disabled={!dirty} onClick={() => saveSettings(form)} style={{ padding: '10px 20px', borderRadius: 10, border: 'none', background: dirty ? 'var(--pine)' : '#B9C4B4', color: '#fff', fontWeight: 600 }}>Save changes</button>
       </div>
     </div>
@@ -2804,7 +2139,7 @@ function App() {
   if (!ready) {
     return (
       <div className="pos-root" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <style>{STYLES}</style>
+        <style>{buildStyles(settings.theme)}</style>
         <p style={{ color: 'var(--muted)', fontSize: 14 }}>Loading pharmacy data…</p>
       </div>
     );
