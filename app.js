@@ -834,14 +834,14 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
               }}>
                 <TrendingUp size={14} />
                 <span className="pos-mono" style={{ fontWeight: 600 }}>{formatMoney(myTodayRevenue, settings.currency)}</span>
-                <span className="pos-topbar-action-label" style={{ opacity: 0.75 }}>today</span>
+                <span style={{ opacity: 0.75 }}>today</span>
               </button>
               <button onClick={() => setAccountsOpen(true)} title="Accounts" style={{
                 display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
                 border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
               }}>
                 <CreditCard size={14} />
-                <span className="pos-topbar-action-label">Accounts</span>
+                <span>Accounts</span>
               </button>
               {user.canManageInventory && (
                 <button onClick={() => setInventoryOpen(true)} title="Manage inventory" style={{
@@ -849,18 +849,18 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                   border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
                 }}>
                   <Package size={14} />
-                  <span className="pos-topbar-action-label">Inventory</span>
+                  <span>Inventory</span>
                 </button>
               )}
             </div>
 
-            {/* Small screens: same three actions tucked behind one button */}
+            {/* Small screens: one button that presses open to reveal the same three tools */}
             <div className="pos-topbar-actions-more" style={{ position: 'relative' }}>
-              <button onClick={() => setMoreOpen((o) => !o)} title="More actions" style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32,
+              <button onClick={() => setMoreOpen((o) => !o)} title="Tools" style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34,
                 borderRadius: 8, border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff'
               }}>
-                <MoreHorizontal size={17} />
+                <MoreHorizontal size={18} />
               </button>
               {moreOpen && (
                 <React.Fragment>
@@ -868,7 +868,7 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
                   <div style={{
                     position: 'absolute', top: '120%', left: 0, background: '#fff', borderRadius: 10,
                     border: '1px solid var(--border)', boxShadow: '0 10px 28px rgba(0,0,0,0.2)',
-                    width: 190, maxWidth: 'calc(100vw - 32px)', zIndex: 61, overflow: 'hidden'
+                    width: 200, maxWidth: 'calc(100vw - 32px)', zIndex: 61, overflow: 'hidden'
                   }}>
                     <button onClick={() => { setSummaryOpen(true); setMoreOpen(false); }} style={{
                       display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '11px 14px',
