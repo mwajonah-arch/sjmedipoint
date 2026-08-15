@@ -295,47 +295,108 @@ function useBarcodeScanner(onScan, enabled) {
 }
 
 // Camera-based scanning using the browser's native Shape Detection API
-// (window.BarcodeDetector) — no extra library needed. Support is currently
-// Chromium/Android-only, so this degrades to a clear "use a hardware
-// scanner instead" message everywhere else rather than failing silently.
+// Camera-based scanning. Chrome/Android get the native Shape Detection API
+// (window.BarcodeDetector) — zero extra download, hardware-accelerated.
+// Everywhere else (Safari on iOS/macOS, Firefox, older Chrome) falls back
+// to ZXing, a pure JS/WASM decoder that only needs getUserMedia + canvas —
+// it's lazy-loaded from esm.sh so browsers that have the native API never
+// pay for it. If neither path works (camera denied, or the fallback
+// library fails to load with no network), the UI degrades to a clear
+// "use a hardware scanner instead" message rather than failing silently.
+const BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'];
+
 function BarcodeScannerModal({ onDetect, onClose }) {
   const videoRef = useRef(null);
   const [error, setError] = useState('');
-  const [supported] = useState(() => typeof window !== 'undefined' && 'BarcodeDetector' in window);
+  const [mode, setMode] = useState('loading'); // 'loading' | 'native' | 'zxing' | 'unsupported'
+  const [nativeSupported] = useState(() => typeof window !== 'undefined' && 'BarcodeDetector' in window);
+
+  // onDetect is often a fresh function identity on every parent render
+  // (e.g. the app re-fetches inventory on a 15s poll / realtime push, which
+  // recreates callbacks memoized on it). Routing calls through a ref means
+  // the camera effect below can ignore that churn entirely and never
+  // restart mid-scan just because the parent re-rendered for an unrelated
+  // reason.
+  const onDetectRef = useRef(onDetect);
+  useEffect(() => { onDetectRef.current = onDetect; }, [onDetect]);
 
   useEffect(() => {
-    if (!supported) return undefined;
     let stream;
     let rafId;
     let cancelled = false;
-    let detector;
+    let zxingControls;
+    let detected = false;
+    const fire = (code) => {
+      if (detected) return;
+      detected = true;
+      onDetectRef.current(code);
+    };
+
+    const runNative = async () => {
+      const detector = new window.BarcodeDetector({ formats: BARCODE_FORMATS });
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
+      setMode('native');
+
+      const tick = async () => {
+        if (cancelled) return;
+        try {
+          const codes = await detector.detect(videoRef.current);
+          if (codes.length > 0) { fire(codes[0].rawValue); return; }
+        } catch (err) {
+          // Transient per-frame decode errors are normal — keep scanning.
+        }
+        rafId = requestAnimationFrame(tick);
+      };
+      rafId = requestAnimationFrame(tick);
+    };
+
+    const runZxing = async () => {
+      const [{ BrowserMultiFormatReader }, { DecodeHintType, BarcodeFormat }] = await Promise.all([
+        import('https://esm.sh/@zxing/browser@0.1.5'),
+        import('https://esm.sh/@zxing/library@0.21.3'),
+      ]);
+      if (cancelled) return;
+      const formatMap = {
+        ean_13: BarcodeFormat.EAN_13, ean_8: BarcodeFormat.EAN_8,
+        upc_a: BarcodeFormat.UPC_A, upc_e: BarcodeFormat.UPC_E,
+        code_128: BarcodeFormat.CODE_128, code_39: BarcodeFormat.CODE_39,
+        qr_code: BarcodeFormat.QR_CODE,
+      };
+      const hints = new Map();
+      hints.set(DecodeHintType.POSSIBLE_FORMATS, BARCODE_FORMATS.map((f) => formatMap[f]));
+      const codeReader = new BrowserMultiFormatReader(hints);
+      setMode('zxing');
+      zxingControls = await codeReader.decodeFromConstraints(
+        { video: { facingMode: 'environment' } },
+        videoRef.current,
+        (result) => { if (result) fire(result.getText()); }
+      );
+      if (cancelled) zxingControls.stop();
+    };
 
     (async () => {
       try {
-        detector = new window.BarcodeDetector({
-          formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'qr_code'],
-        });
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-
-        const tick = async () => {
-          if (cancelled) return;
-          try {
-            const codes = await detector.detect(videoRef.current);
-            if (codes.length > 0) {
-              onDetect(codes[0].rawValue);
-              return;
-            }
-          } catch (err) {
-            // Transient per-frame decode errors are normal — keep scanning.
-          }
-          rafId = requestAnimationFrame(tick);
-        };
-        rafId = requestAnimationFrame(tick);
+        if (nativeSupported) {
+          await runNative();
+        } else {
+          await runZxing();
+        }
       } catch (err) {
-        setError('Camera access was denied or is unavailable on this device.');
+        if (cancelled) return;
+        // Native path failing mid-flight (rare) still has a fallback worth
+        // trying before giving up entirely.
+        if (nativeSupported) {
+          try { await runZxing(); return; } catch (zxErr) { /* fall through to error below */ }
+        }
+        setError(
+          err && err.name === 'NotAllowedError'
+            ? 'Camera access was denied. Allow camera access and try again.'
+            : 'Camera scanning isn\'t available on this device.'
+        );
+        setMode('unsupported');
       }
     })();
 
@@ -343,8 +404,9 @@ function BarcodeScannerModal({ onDetect, onClose }) {
       cancelled = true;
       if (rafId) cancelAnimationFrame(rafId);
       if (stream) stream.getTracks().forEach((t) => t.stop());
+      if (zxingControls) zxingControls.stop();
     };
-  }, [supported, onDetect]);
+  }, [nativeSupported]);
 
   return (
     <div className="pos-modal-backdrop" onClick={onClose}>
@@ -354,20 +416,17 @@ function BarcodeScannerModal({ onDetect, onClose }) {
           <button className="pos-icon-btn" onClick={onClose} title="Close" style={{ color: 'var(--muted)' }}><X size={18} /></button>
         </div>
 
-        {!supported && (
-          <EmptyState icon={Camera} title="Camera scanning isn't supported in this browser"
-            subtitle="A USB or Bluetooth barcode scanner will still work automatically, anywhere in the app — just point and click to fire the trigger." />
+        {mode === 'unsupported' && (
+          <EmptyState icon={AlertTriangle} title="Couldn't start the camera"
+            subtitle={`${error} A USB or Bluetooth barcode scanner will still work automatically, anywhere in the app — just point and click to fire the trigger.`} />
         )}
-        {supported && error && (
-          <EmptyState icon={AlertTriangle} title="Couldn't access the camera" subtitle={error} />
-        )}
-        {supported && !error && (
+        {mode !== 'unsupported' && (
           <div style={{ position: 'relative', borderRadius: 10, overflow: 'hidden', background: '#000' }}>
             <video ref={videoRef} muted playsInline style={{ width: '100%', display: 'block' }} />
             <div style={{ position: 'absolute', inset: '32% 8%', border: '2px solid var(--pine-light)', borderRadius: 8, pointerEvents: 'none' }} />
           </div>
         )}
-        {supported && !error && (
+        {mode !== 'unsupported' && (
           <p style={{ fontSize: 12, color: 'var(--muted)', marginTop: 12, textAlign: 'center' }}>Line the barcode up inside the frame.</p>
         )}
       </div>
