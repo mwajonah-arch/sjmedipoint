@@ -204,6 +204,24 @@ function isSameDay(iso, ref) {
   return d.toDateString() === ref.toDateString();
 }
 
+// Tracks whether a CSS media query currently matches, re-rendering on
+// change (window resize, orientation change, devtools resize). Used to
+// pick between layouts in JS rather than shipping both and hiding one
+// with CSS — keeps a single source of truth instead of duplicated markup.
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' ? window.matchMedia(query).matches : false
+  );
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const handler = (e) => setMatches(e.matches);
+    setMatches(mql.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, [query]);
+  return matches;
+}
+
 function csvCell(value) {
   return `"${String(value ?? '').replace(/"/g, '""')}"`;
 }
@@ -704,6 +722,22 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
   const myTodaySales = sales.filter((s) => s.cashier === user.name && isSameDay(s.timestamp, new Date()) && !s.voided);
   const myTodayRevenue = myTodaySales.reduce((sum, s) => sum + s.total, 0);
 
+  // Below this width the toolbar has only room for one control, so the
+  // three tools below render into a dropdown instead of inline buttons —
+  // same list of tools either way, defined once.
+  const isCompact = useMediaQuery('(max-width: 860px)');
+  const topbarTools = [
+    {
+      key: 'summary', title: "Today's sales", onClick: () => setSummaryOpen(true), Icon: TrendingUp,
+      inlineContent: <React.Fragment><span className="pos-mono" style={{ fontWeight: 600 }}>{formatMoney(myTodayRevenue, settings.currency)}</span><span style={{ opacity: 0.75 }}>today</span></React.Fragment>,
+      trailingValue: <span className="pos-mono" style={{ fontWeight: 600 }}>{formatMoney(myTodayRevenue, settings.currency)}</span>,
+    },
+    { key: 'accounts', title: 'Accounts', onClick: () => setAccountsOpen(true), Icon: CreditCard },
+    ...(user.canManageInventory
+      ? [{ key: 'inventory', title: 'Manage inventory', inlineContent: <span>Inventory</span>, onClick: () => setInventoryOpen(true), Icon: Package }]
+      : []),
+  ];
+
   const categories = ['All', ...Array.from(new Set(inventory.map((p) => p.category)))];
 
   const filtered = inventory.filter((p) => {
@@ -826,78 +860,53 @@ function StaffPOS({ inventory, sales, settings, user, addSale, updateStock, last
       <style>{buildStyles(settings.theme)}</style>
       <TopBar settings={settings} user={user} onLogout={onLogout} lastSynced={lastSynced}
         right={
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <div className="pos-topbar-actions-full">
-              <button onClick={() => setSummaryOpen(true)} title="Today's sales summary" style={{
-                display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
-                border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
-              }}>
-                <TrendingUp size={14} />
-                <span className="pos-mono" style={{ fontWeight: 600 }}>{formatMoney(myTodayRevenue, settings.currency)}</span>
-                <span style={{ opacity: 0.75 }}>today</span>
-              </button>
-              <button onClick={() => setAccountsOpen(true)} title="Accounts" style={{
-                display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
-                border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
-              }}>
-                <CreditCard size={14} />
-                <span>Accounts</span>
-              </button>
-              {user.canManageInventory && (
-                <button onClick={() => setInventoryOpen(true)} title="Manage inventory" style={{
-                  display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
-                  border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
-                }}>
-                  <Package size={14} />
-                  <span>Inventory</span>
-                </button>
-              )}
-            </div>
-
-            {/* Small screens: one button that presses open to reveal the same three tools */}
-            <div className="pos-topbar-actions-more" style={{ position: 'relative' }}>
-              <button onClick={() => setMoreOpen((o) => !o)} title="Tools" style={{
-                display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34,
-                borderRadius: 8, border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff'
-              }}>
-                <MoreHorizontal size={18} />
-              </button>
-              {moreOpen && (
-                <React.Fragment>
-                  <div onClick={() => setMoreOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
-                  <div style={{
-                    position: 'absolute', top: '120%', left: 0, background: '#fff', borderRadius: 10,
-                    border: '1px solid var(--border)', boxShadow: '0 10px 28px rgba(0,0,0,0.2)',
-                    width: 200, maxWidth: 'calc(100vw - 32px)', zIndex: 61, overflow: 'hidden'
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            {!isCompact && (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                {topbarTools.map(({ key, title, inlineContent, onClick, Icon }) => (
+                  <button key={key} onClick={onClick} title={title} style={{
+                    display: 'flex', alignItems: 'center', gap: 7, padding: '7px 11px', borderRadius: 8,
+                    border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff', fontSize: 12.5
                   }}>
-                    <button onClick={() => { setSummaryOpen(true); setMoreOpen(false); }} style={{
-                      display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '11px 14px',
-                      border: 'none', borderBottom: '1px solid var(--border)', background: '#fff', color: 'var(--ink)',
-                      fontSize: 13, textAlign: 'left'
+                    <Icon size={14} />
+                    {inlineContent || <span>{title}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {isCompact && (
+              <div style={{ position: 'relative' }}>
+                <button onClick={() => setMoreOpen((o) => !o)} title="Tools" style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', width: 34, height: 34,
+                  borderRadius: 8, border: 'none', background: 'rgba(255,255,255,0.12)', color: '#fff'
+                }}>
+                  <MoreHorizontal size={18} />
+                </button>
+                {moreOpen && (
+                  <React.Fragment>
+                    <div onClick={() => setMoreOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 60 }} />
+                    <div style={{
+                      position: 'absolute', top: '120%', left: 0, background: '#fff', borderRadius: 10,
+                      border: '1px solid var(--border)', boxShadow: '0 10px 28px rgba(0,0,0,0.2)',
+                      width: 200, maxWidth: 'calc(100vw - 32px)', zIndex: 61, overflow: 'hidden'
                     }}>
-                      <TrendingUp size={15} color="var(--pine)" />
-                      <span style={{ flex: 1 }}>Today's sales</span>
-                      <span className="pos-mono" style={{ fontWeight: 600, fontSize: 12.5 }}>{formatMoney(myTodayRevenue, settings.currency)}</span>
-                    </button>
-                    <button onClick={() => { setAccountsOpen(true); setMoreOpen(false); }} style={{
-                      display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '11px 14px',
-                      border: 'none', borderBottom: user.canManageInventory ? '1px solid var(--border)' : 'none',
-                      background: '#fff', color: 'var(--ink)', fontSize: 13, textAlign: 'left'
-                    }}>
-                      <CreditCard size={15} color="var(--pine)" /> Accounts
-                    </button>
-                    {user.canManageInventory && (
-                      <button onClick={() => { setInventoryOpen(true); setMoreOpen(false); }} style={{
-                        display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '11px 14px',
-                        border: 'none', background: '#fff', color: 'var(--ink)', fontSize: 13, textAlign: 'left'
-                      }}>
-                        <Package size={15} color="var(--pine)" /> Manage inventory
-                      </button>
-                    )}
-                  </div>
-                </React.Fragment>
-              )}
-            </div>
+                      {topbarTools.map(({ key, title, trailingValue, onClick, Icon }, i) => (
+                        <button key={key} onClick={() => { onClick(); setMoreOpen(false); }} style={{
+                          display: 'flex', alignItems: 'center', gap: 9, width: '100%', padding: '11px 14px',
+                          border: 'none', borderBottom: i < topbarTools.length - 1 ? '1px solid var(--border)' : 'none',
+                          background: '#fff', color: 'var(--ink)', fontSize: 13, textAlign: 'left'
+                        }}>
+                          <Icon size={15} color="var(--pine)" />
+                          <span style={{ flex: 1 }}>{title}</span>
+                          {trailingValue && <span style={{ fontSize: 12.5 }}>{trailingValue}</span>}
+                        </button>
+                      ))}
+                    </div>
+                  </React.Fragment>
+                )}
+              </div>
+            )}
 
             <div style={{ fontSize: 12, opacity: 0.85 }}>{cart.length} item{cart.length !== 1 ? 's' : ''} in cart</div>
           </div>
